@@ -61,25 +61,30 @@ export async function POST(req: Request) {
       [name, username, email, hashedPassword]
     );
     
-    // Check if default group exists, if not create it
-    const generalGroup = await db.query(
-      'SELECT id FROM groups WHERE name = $1',
-      [DEFAULT_GROUP_NAME]
+    // Find the primary group
+    const primaryGroup = await db.query(
+      'SELECT id FROM groups WHERE is_primary = TRUE'
     );
     
-    let groupId;
-    if (generalGroup.rows.length === 0) {
-      const newGroup = await db.query(
-        'INSERT INTO groups (name) VALUES ($1) RETURNING id',
-        [DEFAULT_GROUP_NAME]
+    if (primaryGroup.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return NextResponse.json(
+        { error: 'No primary group found in the system' },
+        { status: 500 }
       );
-      groupId = newGroup.rows[0].id;
-    } else {
-      groupId = generalGroup.rows[0].id;
     }
+
+    // Add user to the primary group
+    await db.query(
+      'INSERT INTO group_members (user_id, group_id) VALUES ($1, $2)',
+      [userResult.rows[0].id, primaryGroup.rows[0].id]
+    );
+
+    await db.query('COMMIT');
 
     return NextResponse.json({ message: 'User created successfully', userId: userResult.rows[0].id }, { status: 201 });
   } catch (error) {
+    await db.query('ROLLBACK');
     console.error('Error creating user:', error);
     return NextResponse.json({ error: 'Error creating user' }, { status: 500 });
   }

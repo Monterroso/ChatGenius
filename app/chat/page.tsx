@@ -114,7 +114,7 @@ export default function Chat() {
   };
 
   const fetchGroups = async () => {
-    const response = await fetch('/api/groups');
+    const response = await fetch('/api/groups/member');
     if (response.ok) {
       const data = await response.json();
       setGroups(data);
@@ -231,7 +231,11 @@ export default function Chat() {
       const match = word.match(inviteLinkPattern);
       if (match) {
         const inviteId = match[1];
-        return <GroupInviteButton key={index} inviteId={inviteId} />;
+        return <GroupInviteButton 
+          key={index} 
+          inviteId={inviteId} 
+          onGroupJoined={fetchGroups} 
+        />;
       }
       return <span key={index}>{word} </span>;
     });
