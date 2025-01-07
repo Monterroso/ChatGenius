@@ -2,27 +2,52 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { signIn } from 'next-auth/react';
 
 export default function Signup() {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const response = await fetch('/api/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, username, email, password }),
-    });
+    setError('');
+    
+    try {
+      const response = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, username, email, password }),
+      });
 
-    if (response.ok) {
-      router.push('/login');
-    } else {
-      // Handle error
-      console.error('Signup failed');
+      const data = await response.json();
+
+      if (response.ok) {
+        const result = await signIn('credentials', {
+          redirect: false,
+          email,
+          password,
+        });
+
+        if (result?.error) {
+          setError('Account created but login failed. Please try logging in.');
+        } else {
+          router.push('/chat');
+        }
+      } else {
+        setError(data.error || 'Signup failed. Please try again.');
+        setTimeout(() => {
+          setError('');
+        }, 3000);
+      }
+    } catch (err) {
+      setError('An unexpected error occurred. Please try again.');
+      setTimeout(() => {
+        setError('');
+      }, 3000);
     }
   };
 
@@ -30,10 +55,15 @@ export default function Signup() {
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-96">
         <h1 className="text-2xl font-bold mb-6 text-center">Sign Up</h1>
+        {error && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded animate-fade-in">
+            <p className="text-red-600">{error}</p>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-              Name
+              UserID (this cannot be changed once created!)
             </label>
             <input
               type="text"
@@ -46,7 +76,7 @@ export default function Signup() {
           </div>
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-              Username
+              Username (this can be changed later)
             </label>
             <input
               type="text"

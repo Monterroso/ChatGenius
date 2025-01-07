@@ -2,30 +2,83 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import db from '../../../lib/db';
 
+const DEFAULT_GROUP_NAME = process.env.DEFAULT_GROUP_NAME || 'general';
+
 export async function POST(req: Request) {
   const { name, username, email, password } = await req.json();
 
   try {
-    // Check if user already exists
-    const existingUser = await db.query(
-      'SELECT * FROM users WHERE email = $1 OR username = $2',
-      [email, username]
-    );
-
-    if (existingUser.rows.length > 0) {
-      return NextResponse.json({ error: 'Email or username already exists' }, { status: 400 });
+    // Validate name length (maximum 15 characters)
+    if (name.length > 15) {
+      return NextResponse.json(
+        { error: 'Name must not exceed 15 characters' },
+        { status: 400 }
+      );
     }
 
-    // Hash the password
+    // Check if email already exists
+    const existingEmail = await db.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existingEmail.rows.length > 0) {
+      return NextResponse.json(
+        { error: 'This email address is already registered' },
+        { status: 400 }
+      );
+    }
+
+    // Check if username already exists
+    const existingUsername = await db.query(
+      'SELECT * FROM users WHERE username = $1',
+      [username]
+    );
+
+    if (existingUsername.rows.length > 0) {
+      return NextResponse.json(
+        { error: 'This username is already taken' },
+        { status: 400 }
+      );
+    }
+
+    // Validate password strength (minimum 8 characters)
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: 'Password must be at least 8 characters long' },
+        { status: 400 }
+      );
+    }
+
+    // Hash the password and create user
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    await db.query('BEGIN');
+
     // Insert the new user
-    const result = await db.query(
+    const userResult = await db.query(
       'INSERT INTO users (name, username, email, password) VALUES ($1, $2, $3, $4) RETURNING id',
       [name, username, email, hashedPassword]
     );
+    
+    // Check if default group exists, if not create it
+    const generalGroup = await db.query(
+      'SELECT id FROM groups WHERE name = $1',
+      [DEFAULT_GROUP_NAME]
+    );
+    
+    let groupId;
+    if (generalGroup.rows.length === 0) {
+      const newGroup = await db.query(
+        'INSERT INTO groups (name) VALUES ($1) RETURNING id',
+        [DEFAULT_GROUP_NAME]
+      );
+      groupId = newGroup.rows[0].id;
+    } else {
+      groupId = generalGroup.rows[0].id;
+    }
 
-    return NextResponse.json({ message: 'User created successfully', userId: result.rows[0].id }, { status: 201 });
+    return NextResponse.json({ message: 'User created successfully', userId: userResult.rows[0].id }, { status: 201 });
   } catch (error) {
     console.error('Error creating user:', error);
     return NextResponse.json({ error: 'Error creating user' }, { status: 500 });

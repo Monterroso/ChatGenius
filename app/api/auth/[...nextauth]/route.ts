@@ -6,15 +6,20 @@ import db from '../../../../lib/db';
 import type { User } from 'next-auth';
 
 declare module 'next-auth' {
+  interface User {
+    username: string;
+  }
+  
   interface Session {
     user: {
       id: string;
       name: string;
+      username: string;
     } & DefaultSession['user']
   }
 }
 
-const handler = NextAuth({
+export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       name: 'Credentials',
@@ -39,7 +44,7 @@ const handler = NextAuth({
         if (!isPasswordValid) {
           return null;
         }
-
+        console.log(user, "User First")
         return {
           id: user.id,
           email: user.email,
@@ -50,20 +55,22 @@ const handler = NextAuth({
     })
   ],
   session: {
-    strategy: 'jwt'
+    strategy: 'jwt' as const
   },
   callbacks: {
     async jwt({ token, user }: { token: JWT; user?: User }) {
       if (user) {
         token.id = user.id;
-        token.username = user.name;
+        token.name = user.name;
+        token.username = user.username;
       }
       return token;
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (session.user) {
         session.user.id = token.id as string;
-        session.user.name = token.username as string;
+        session.user.name = token.name as string;
+        session.user.username = token.username as string;
       }
       return session;
     }
@@ -71,7 +78,8 @@ const handler = NextAuth({
   pages: {
     signIn: '/login',
   },
-});
+};
 
+const handler = NextAuth(authOptions)
 export { handler as GET, handler as POST };
 
