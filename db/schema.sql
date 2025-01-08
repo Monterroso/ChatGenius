@@ -8,6 +8,13 @@ CREATE TABLE users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE groups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  is_primary BOOLEAN DEFAULT FALSE
+);
+
 CREATE TABLE messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   content TEXT NOT NULL,
@@ -17,20 +24,11 @@ CREATE TABLE messages (
   group_id UUID REFERENCES groups(id)
 );
 
-CREATE TABLE groups (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  is_primary BOOLEAN DEFAULT FALSE,
-  CONSTRAINT single_primary_group 
-    CHECK (
-      NOT (is_primary IS TRUE AND EXISTS (
-        SELECT 1 FROM groups g2 
-        WHERE g2.is_primary IS TRUE 
-        AND g2.id != id
-      ))
-    )
-);
+
+-- Add a unique index that only applies to primary groups
+CREATE UNIQUE INDEX single_primary_group 
+  ON groups ((TRUE))
+  WHERE is_primary = TRUE;
 
 CREATE TABLE group_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

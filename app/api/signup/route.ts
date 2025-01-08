@@ -66,18 +66,23 @@ export async function POST(req: Request) {
       'SELECT id FROM groups WHERE is_primary = TRUE'
     );
     
+    let primaryGroupId;
+    
     if (primaryGroup.rows.length === 0) {
-      await db.query('ROLLBACK');
-      return NextResponse.json(
-        { error: 'No primary group found in the system' },
-        { status: 500 }
+      // Create the primary group if it doesn't exist
+      const newPrimaryGroup = await db.query(
+        'INSERT INTO groups (name, is_primary) VALUES ($1, TRUE) RETURNING id',
+        [DEFAULT_GROUP_NAME]
       );
+      primaryGroupId = newPrimaryGroup.rows[0].id;
+    } else {
+      primaryGroupId = primaryGroup.rows[0].id;
     }
 
     // Add user to the primary group
     await db.query(
       'INSERT INTO group_members (user_id, group_id) VALUES ($1, $2)',
-      [userResult.rows[0].id, primaryGroup.rows[0].id]
+      [userResult.rows[0].id, primaryGroupId]
     );
 
     await db.query('COMMIT');
