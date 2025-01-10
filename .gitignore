@@ -63,3 +63,7 @@ logs
 # Dependencies
 package-lock.json
 yarn.lock 
+
+# Cursor
+.cursorrules
+.cursor.json

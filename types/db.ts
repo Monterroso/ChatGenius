@@ -11,6 +11,9 @@ export type DBUser = {
     password: string;              // NOT NULL
     created_at: string;            // TIMESTAMP WITH TIME ZONE
     updated_at: string;            // TIMESTAMP WITH TIME ZONE
+    presence: 'online' | 'offline' | 'away' | 'busy' | 'invisible';
+    last_seen: Date;
+    status: string | null;
   }
   
   /** Message record in the database

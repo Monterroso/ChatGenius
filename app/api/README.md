@@ -4,74 +4,92 @@
 - `POST /api/auth/[...nextauth]` - NextAuth.js authentication handler
   - Handles login/logout and session management
   - Uses credentials provider with email/password
-  - Returns JWT with user id, name, and username
+  - Returns JWT containing:
+    - User ID
+    - Name
+    - Username
+    - Email
+  - Custom session includes user ID, name, and username
 
+## Signup
 - `POST /api/signup`
   - Creates new user account
-  - Validates:
+  - Required fields: name, username, email, password
+  - Validations:
     - Username uniqueness
     - Email uniqueness
     - Name length (max 15 characters)
     - Password strength (min 8 characters)
-  - Auto-creates default group if not exists
+  - Auto-creates default group if not exists (name from env: DEFAULT_GROUP_NAME)
   - Auto-joins user to default group
   - Returns user ID on success
+  - Uses transaction to ensure data consistency
 
 ## Groups
 - `GET /api/groups`
   - Lists all groups
+  - Returns: id, name, created_at
   - Sorted by primary status and creation date
   - Requires authentication
 
 - `POST /api/groups`
   - Creates new group
-  - Requires authentication
+  - Required fields: name
+  - Validates name is non-empty
   - Auto-adds creator as first member
-  - Returns group details
+  - Returns: id, name, created_at
 
 - `GET /api/groups/member`
   - Lists all groups the authenticated user is a member of
+  - Returns full group details
   - Sorted by primary status and creation date
   - Requires authentication
 
 - `GET /api/groups/[id]`
   - Returns group details and member list
-  - Includes member join dates
+  - Includes:
+    - Group details (all fields)
+    - Member list with join dates
+    - Member details (id, name, username)
   - Requires authentication
 
 - `GET /api/groups/[id]/members`
   - Lists all members of a specific group
-  - Returns user_id and group_id pairs
+  - Returns: user_id and group_id pairs
   - Requires authentication
 
 - `GET /api/groups/[id]/messages`
   - Retrieves last 50 messages for group
   - Includes sender details (name, username)
-  - Sorted by creation date
+  - Sorted by creation date (DESC)
   - Requires authentication
 
 - `POST /api/groups/[id]/messages`
   - Creates new group message
+  - Required fields: content
+  - Returns created message with full details
   - Requires authentication
-  - Returns created message details
 
 ## Messages
 - `GET /api/messages`
   - Fetches messages filtered by:
     - `groupId` - Group messages
     - `userId` - Direct messages
-  - Returns last 50 messages with sender/receiver details
+  - Returns last 50 messages
+  - Includes sender and receiver details
+  - Sorted by creation date (ASC)
   - Requires authentication
 
 - `POST /api/messages`
   - Creates new message
-  - Supports both group and direct messages
-  - Requires either groupId or receiverId (not both)
+  - Required fields: content, and either groupId or receiverId (not both)
+  - Returns created message details
   - Requires authentication
 
 - `GET /api/messages/contacts`
   - Lists unique users who have exchanged messages with current user
-  - Returns user IDs
+  - Returns array of user IDs
+  - Includes both sent and received messages
   - Requires authentication
 
 ## Users
@@ -80,32 +98,91 @@
   - Returns safe user data (id, name, username)
   - Requires authentication
 
+- `GET /api/users/presence`
+  - Returns user presence information from user_presence table
+  - Excludes users with 'invisible' presence
+  - Returns object with user_id: { presence, lastSeen } pairs
+  - Requires authentication
+
+- `PUT /api/users/presence`
+  - Updates or creates the user's presence record
+  - Required fields: presence
+  - Valid presence values:
+    - 'online'
+    - 'away'
+    - 'busy'
+    - 'offline'
+    - 'invisible'
+  - Automatically updates:
+    - last_seen timestamp
+    - updated_at timestamp
+  - Creates new presence record if none exists
+  - Returns success status
+  - Requires authentication
+
+- `GET /api/users/status`
+  - Returns user status messages
+  - Returns object with user_id: status pairs
+  - Requires authentication
+
 ## Invites
 - `GET /api/invites/[inviteId]`
   - Get invite information
   - Returns group name for valid invites
-  - Validates invite format
+  - Validates invite format (alphanumeric + dash)
   - Checks expiration
   - No authentication required
 
 - `POST /api/invites/[inviteId]/accept`
   - Accept an invite and join group
+  - Validates:
+    - Invite existence and expiration
+    - User not already a member
   - Requires authentication
-  - Validates invite expiration
-  - Prevents duplicate memberships
+  - Returns success status
 
 - `POST /api/groups/[id]/invites`
   - Create new invite for a group
-  - Requires authentication
   - Validates group membership
   - Sets 7-day expiration
-  - Returns invite ID for sharing
+  - Returns invite ID
+  - Requires authentication
+
+## Socket
+- `GET /api/socket`
+  - Returns Socket.IO server URL configuration
+  - Response format: `{ socketUrl: string }`
+  - Environment variables:
+    - `NEXT_PUBLIC_SOCKET_URL` - Custom socket server URL
+    - `SOCKET_PORT` - Custom socket port
+    - Falls back to `ws://localhost:3001` if not set
+  - Headers: `Content-Type: application/json`
+  - No authentication required
+  - Force dynamic route (no caching)
+  - Used by client to determine WebSocket connection endpoint
+
+## Socket Server (WebSocket)
+- Runs on port 3001 (configurable via `SOCKET_PORT`)
+- Handles real-time presence updates:
+  - User connections/disconnections
+  - Presence changes ('online', 'offline', etc.)
+- Events:
+  - `connection`: New socket connection
+  - `presenceChange`: User updates their presence
+  - `disconnect`: Socket disconnection
+- Emits:
+  - `userPresenceChanged`: `{ userId: string, presence: string }`
+  - `initialPresences`: Current presence state for all users
+- CORS configured to match Next.js app URL
+  - Uses `NEXT_PUBLIC_APP_URL` or defaults to `http://localhost:3000`
 
 ## Security
 - All routes require authentication except:
   - `/api/auth/[...nextauth]`
   - `/api/signup`
   - `/api/invites/[inviteId]` (GET only)
+  - `/api/socket`
 - Uses NextAuth.js session validation
 - Password hashing with bcrypt
 - SQL injection protection via parameterized queries
+- Transaction support for data consistency

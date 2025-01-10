@@ -76,6 +76,7 @@ export default function Chat() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewGroupPopup, setShowNewGroupPopup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [messageError, setMessageError] = useState(false);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -157,9 +158,14 @@ export default function Chat() {
       if (response.ok) {
         setMessage('');
         fetchMessages(selectedConversation.id, selectedConversation.type);
+      } else {
+        setMessageError(true);
+        setTimeout(() => setMessageError(false), 2000); // Reset after 2 seconds
       }
     } catch (error) {
       console.error('Failed to send message:', error);
+      setMessageError(true);
+      setTimeout(() => setMessageError(false), 2000); // Reset after 2 seconds
     }
   };
 
@@ -276,6 +282,26 @@ export default function Chat() {
     }
   };
 
+  const renderUser = (user: SafeUser) => (
+    <li 
+      key={user.id}
+      className={`mb-2 p-2 rounded cursor-pointer ${
+        selectedConversation?.id === user.id 
+          ? 'bg-gray-700' 
+          : 'hover:bg-gray-700'
+      }`}
+      onClick={() => handleConversationSelect({
+        id: user.id,
+        type: 'direct',
+        name: user.name || ''
+      })}
+    >
+      <div className="flex items-center">
+        {user.name} (@{user.username})
+      </div>
+    </li>
+  );
+
   if (status === 'loading') {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
@@ -376,109 +402,110 @@ export default function Chat() {
         </div>
       )}
 
-      <div className="w-1/4 bg-gray-800 text-white p-4 flex flex-col">
-        <div className="mb-8">
-          <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
-            <span>Groups</span>
-            <button
-              onClick={() => setShowNewGroupPopup(true)}
-              className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-              title="Create new group"
-            >
-              +
-            </button>
-          </h2>
-          <ul>
-            {groups.map((group) => (
-              <li 
-                key={group.id} 
-                className={`mb-2 p-2 rounded cursor-pointer flex items-center justify-between ${
-                  selectedConversation?.id === group.id 
-                    ? 'bg-gray-700' 
-                    : 'hover:bg-gray-700'
-                }`}
+      <div className="w-1/4 bg-gray-800 text-white flex flex-col">
+        <div className="p-4 flex flex-col h-full">
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+              <span>Groups</span>
+              <button
+                onClick={() => setShowNewGroupPopup(true)}
+                className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                title="Create new group"
               >
-                <div
-                  onClick={() => handleConversationSelect({
-                    id: group.id,
-                    type: 'group',
-                    name: group.name
-                  })}
-                  className="flex-grow"
-                >
-                  # {group.name}
-                </div>
-                <button
-                  onClick={(e) => handleCreateInvite(group.id, e)}
-                  className="ml-2 px-2 py-1 text-xs bg-primary rounded hover:bg-primary/90 transition-colors"
-                  title="Create invite link"
-                >
-                  Share
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="flex-1 overflow-hidden">
-          {selectedConversation?.type === 'group' && (
-            <>
-              <h2 className="text-xl font-bold mb-4">Group Members</h2>
-              <ul className="overflow-y-auto max-h-[40%]">
-                {users
-                  .filter(user => groupMembers.some(member => member.user_id === user.id))
-                  .map((user) => (
-                    <li 
-                      key={user.id}
-                      className={`mb-2 p-2 rounded cursor-pointer ${
-                        selectedConversation?.id === user.id 
-                          ? 'bg-gray-700' 
-                          : 'hover:bg-gray-700'
-                      }`}
-                      onClick={() => handleConversationSelect({
-                        id: user.id,
-                        type: 'direct',
-                        name: user.name || ''
-                      })}
-                    >
-                      {user.name} (@{user.username})
-                    </li>
-                  ))}
-              </ul>
-            </>
-          )}
-
-          <h2 className={`text-xl font-bold mb-4 ${selectedConversation?.type === 'group' ? 'mt-8' : ''} flex items-center justify-between`}>
-            <span>Recent Contacts</span>
-            <button
-              onClick={() => setShowNewMessagePopup(true)}
-              className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-              title="New message"
-            >
-              +
-            </button>
-          </h2>
-          <ul className="overflow-y-auto max-h-[40%]">
-            {users
-              .filter(user => usersWithMessages.has(user.id))
-              .map((user) => (
+                +
+              </button>
+            </h2>
+            <ul>
+              {groups.map((group) => (
                 <li 
-                  key={user.id}
-                  className={`mb-2 p-2 rounded cursor-pointer ${
-                    selectedConversation?.id === user.id 
+                  key={group.id} 
+                  className={`mb-2 p-2 rounded cursor-pointer flex items-center justify-between ${
+                    selectedConversation?.id === group.id 
                       ? 'bg-gray-700' 
                       : 'hover:bg-gray-700'
                   }`}
-                  onClick={() => handleConversationSelect({
-                    id: user.id,
-                    type: 'direct',
-                    name: user.name || ''
-                  })}
                 >
-                  {user.name} (@{user.username})
+                  <div
+                    onClick={() => handleConversationSelect({
+                      id: group.id,
+                      type: 'group',
+                      name: group.name
+                    })}
+                    className="flex-grow"
+                  >
+                    # {group.name}
+                  </div>
+                  <button
+                    onClick={(e) => handleCreateInvite(group.id, e)}
+                    className="ml-2 px-2 py-1 text-xs bg-primary rounded hover:bg-primary/90 transition-colors"
+                    title="Create invite link"
+                  >
+                    Share
+                  </button>
                 </li>
               ))}
-          </ul>
+            </ul>
+          </div>
+
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {selectedConversation?.type === 'group' && (
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <h2 className="text-xl font-bold mb-4">Group Members</h2>
+                <ul className="overflow-y-auto flex-1">
+                  {users
+                    .filter(user => groupMembers.some(member => member.user_id === user.id))
+                    .map((user) => (
+                      <li 
+                        key={user.id}
+                        className={`mb-2 p-2 rounded cursor-pointer ${
+                          selectedConversation?.id === user.id 
+                            ? 'bg-gray-700' 
+                            : 'hover:bg-gray-700'
+                        }`}
+                      >
+                        {user.name} (@{user.username})
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
+
+            {selectedConversation?.type !== 'group' && (
+              <>
+                <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                  <span>Recent Contacts</span>
+                  <button
+                    onClick={() => setShowNewMessagePopup(true)}
+                    className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                    title="New message"
+                  >
+                    +
+                  </button>
+                </h2>
+                <ul className="overflow-y-auto flex-1">
+                  {users
+                    .filter(user => usersWithMessages.has(user.id))
+                    .map((user) => (
+                      <li 
+                        key={user.id}
+                        className={`mb-2 p-2 rounded cursor-pointer ${
+                          selectedConversation?.id === user.id 
+                            ? 'bg-gray-700' 
+                            : 'hover:bg-gray-700'
+                        }`}
+                        onClick={() => handleConversationSelect({
+                          id: user.id,
+                          type: 'direct',
+                          name: user.name || ''
+                        })}
+                      >
+                        @{user.username}
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
+          </div>
         </div>
       </div>
       <div className="w-3/4 flex flex-col">
@@ -522,7 +549,11 @@ export default function Chat() {
                   ? `Message ${selectedConversation.name}...`
                   : "Select a conversation to start chatting"
               }
-              className="w-full px-3 py-2 border rounded-md"
+              className={`w-full px-3 py-2 border rounded-md transition-colors duration-300 ${
+                messageError 
+                  ? 'border-red-500' 
+                  : 'border-gray-300'
+              }`}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {

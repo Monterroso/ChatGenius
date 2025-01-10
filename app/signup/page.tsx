@@ -120,6 +120,13 @@ export default function Signup() {
             Sign Up
           </button>
         </form>
+        
+        <div className="mt-4 text-center text-sm text-gray-600">
+          Already have an account?{' '}
+          <a href="/login" className="text-indigo-600 hover:text-indigo-500">
+            Sign in
+          </a>
+        </div>
       </div>
     </div>
   );
