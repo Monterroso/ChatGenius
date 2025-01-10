@@ -95,45 +95,45 @@
 ## Users
 - `GET /api/users`
   - Lists all users except current user
-  - Returns safe user data (id, name, username)
+  - Returns user data with:
+    - id
+    - name 
+    - username
+    - status (calculated effective status)
+    - lastSeen
+  - Status is calculated using:
+    - Manual status
+    - Auto status (defaults to 'offline')
+    - Invisible flag
+    - Last seen timestamp
+    - Connected devices
   - Requires authentication
 
-- `GET /api/users/presence`
-  - Returns user presence information from user_presence table
-  - Excludes users with 'invisible' presence
-  - Returns array of presence records with format:
-    ```typescript
-    {
-      user_id: string;
-      presence: 'online' | 'offline' | 'away' | 'busy';
-      last_seen: string;  // ISO timestamp
-    }[]
-    ```
-  - No authentication required
+- `GET /api/users/status`
+  - Returns current user's status information
+  - Returns calculated effective status based on:
+    - Manual status
+    - Auto status
+    - Invisible flag
+    - Last seen timestamp
+    - Connected devices
+  - Returns 404 if status not found
+  - Requires authentication
 
-- `PUT /api/users/presence`
-  - Updates or creates the user's presence record
-  - Required fields: presence
-  - Valid presence values:
-    - 'online'
-    - 'away'
-    - 'busy'
-    - 'offline'
-    - 'invisible'
+- `POST /api/users/status`
+  - Updates user's manual status
+  - Required fields: status
+  - Updates last_seen timestamp automatically
   - Uses upsert to handle both creation and updates
-  - Returns success status
+  - Broadcasts status change via Socket.IO
+  - Returns calculated effective status
   - Requires authentication
   - Request body format:
     ```typescript
     {
-      presence: 'online' | 'offline' | 'away' | 'busy' | 'invisible'
+      status: string
     }
     ```
-
-- `GET /api/users/status`
-  - Returns user status messages
-  - Returns object with user_id: status pairs
-  - Requires authentication
 
 ## Invites
 - `GET /api/invites/[inviteId]`

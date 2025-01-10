@@ -1,17 +1,22 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useSession } from 'next-auth/react';
+import { EffectiveStatus } from '@/types/db';
 
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
+  updateStatus: (status: string) => Promise<void>;
+  userStatuses: Map<string, EffectiveStatus>;
 }
 
-const SocketContext = createContext<SocketContextType>({
+export const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
+  updateStatus: async () => {},
+  userStatuses: new Map(),
 });
 
 export const useSocket = () => useContext(SocketContext);
@@ -20,6 +25,24 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const { data: session } = useSession();
+  const [userStatuses, setUserStatuses] = useState<Map<string, EffectiveStatus>>(new Map());
+
+  const updateStatus = useCallback(async (status: string) => {
+    try {
+      const response = await fetch('/api/users/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      
+      if (!response.ok) throw new Error('Failed to update status');
+      
+      const newStatus = await response.json();
+      setUserStatuses(prev => new Map(prev).set(newStatus.userId, newStatus));
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
+  }, []);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -99,8 +122,47 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    // Fetch initial statuses when socket connects
+    const fetchInitialStatuses = async () => {
+      try {
+        const response = await fetch('/api/users/status');
+        if (response.ok) {
+          const statuses = await response.json();
+          setUserStatuses(new Map(statuses.map((status: EffectiveStatus) => 
+            [status.userId, status]
+          )));
+        }
+      } catch (error) {
+        console.error('Error fetching initial statuses:', error);
+      }
+    };
+
+    if (socket) {
+      console.log('Socket connected, fetching initial statuses');
+      fetchInitialStatuses();
+
+      socket.on('statusChanged', (status: EffectiveStatus) => {
+        setUserStatuses(prev => new Map(prev).set(status.userId, status));
+      });
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('statusChanged');
+      }
+    };
+  }, [socket, session]);
+
   return (
-    <SocketContext.Provider value={{ socket, isConnected }}>
+    <SocketContext.Provider value={{
+      socket,
+      isConnected,
+      updateStatus,
+      userStatuses,
+    }}>
       {children}
     </SocketContext.Provider>
   );

@@ -11,7 +11,6 @@ export type DBUser = {
     password: string;              // NOT NULL
     created_at: string;            // TIMESTAMP WITH TIME ZONE
     updated_at: string;            // TIMESTAMP WITH TIME ZONE
-    presence: 'online' | 'offline' | 'away' | 'busy' | 'invisible';
     last_seen: Date;
     status: string | null;
   }
@@ -58,4 +57,28 @@ export type DBUser = {
     id: string;
     type: 'group' | 'direct';
     name: string;
+  }
+
+  export type AutoStatus = 'online' | 'away' | 'dnd' | 'offline';
+
+  export interface UserDevice {
+    id: string;
+    lastActive: string;
+    userAgent: string;
+  }
+
+  export interface UserStatus {
+    userId: string;
+    manualStatus?: string | null;
+    autoStatus: AutoStatus;
+    invisible: boolean;
+    lastSeen: string;
+    devices: UserDevice[];
+  }
+
+  export interface EffectiveStatus {
+    userId: string;
+    status: string;
+    isOnline: boolean;
+    lastSeen: string;
   }

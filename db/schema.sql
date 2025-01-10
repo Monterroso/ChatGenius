@@ -51,45 +51,30 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Update user_status table
+DROP TABLE IF EXISTS user_status;
 CREATE TABLE user_status (
-  user_id UUID PRIMARY KEY REFERENCES users(id),
-  status VARCHAR(50) NOT NULL DEFAULT 'online',
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Add trigger to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_status_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = CURRENT_TIMESTAMP;
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_user_status_timestamp
-  BEFORE UPDATE ON user_status
-  FOR EACH ROW
-  EXECUTE FUNCTION update_status_timestamp();
-
--- Create new user_presence table
-CREATE TABLE user_presence (
     user_id UUID PRIMARY KEY REFERENCES users(id),
-    presence VARCHAR(20) DEFAULT 'offline',
-    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    manual_status TEXT,
+    auto_status TEXT CHECK (auto_status IN ('online', 'away', 'dnd', 'offline')),
+    invisible BOOLEAN DEFAULT false,
+    last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    devices JSONB DEFAULT '[]',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Add trigger to update last_seen timestamp
-CREATE OR REPLACE FUNCTION update_presence_timestamp()
+-- Add trigger to update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
-    NEW.last_seen = CURRENT_TIMESTAMP;
     RETURN NEW;
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_user_presence_timestamp
-    BEFORE UPDATE ON user_presence
+CREATE TRIGGER update_user_status_updated_at
+    BEFORE UPDATE ON user_status
     FOR EACH ROW
-    EXECUTE FUNCTION update_presence_timestamp();
+    EXECUTE FUNCTION update_updated_at_column();
+
