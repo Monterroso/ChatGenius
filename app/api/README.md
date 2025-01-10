@@ -101,8 +101,15 @@
 - `GET /api/users/presence`
   - Returns user presence information from user_presence table
   - Excludes users with 'invisible' presence
-  - Returns object with user_id: { presence, lastSeen } pairs
-  - Requires authentication
+  - Returns array of presence records with format:
+    ```typescript
+    {
+      user_id: string;
+      presence: 'online' | 'offline' | 'away' | 'busy';
+      last_seen: string;  // ISO timestamp
+    }[]
+    ```
+  - No authentication required
 
 - `PUT /api/users/presence`
   - Updates or creates the user's presence record
@@ -113,12 +120,15 @@
     - 'busy'
     - 'offline'
     - 'invisible'
-  - Automatically updates:
-    - last_seen timestamp
-    - updated_at timestamp
-  - Creates new presence record if none exists
+  - Uses upsert to handle both creation and updates
   - Returns success status
   - Requires authentication
+  - Request body format:
+    ```typescript
+    {
+      presence: 'online' | 'offline' | 'away' | 'busy' | 'invisible'
+    }
+    ```
 
 - `GET /api/users/status`
   - Returns user status messages

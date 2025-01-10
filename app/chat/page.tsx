@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation } from '@/types/db';
 
 interface GroupInviteButtonProps {
@@ -61,6 +61,13 @@ const GroupInviteButton = ({ inviteId, onGroupJoined }: GroupInviteButtonProps) 
   );
 };
 
+type Presence = 'online' | 'offline' | 'away' | 'busy' | 'invisible';
+
+interface UserPresence {
+  userId: string;
+  presence: Presence;
+}
+
 export default function Chat() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -77,6 +84,7 @@ export default function Chat() {
   const [showNewGroupPopup, setShowNewGroupPopup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [messageError, setMessageError] = useState(false);
+  const [userPresences, setUserPresences] = useState<Record<string, { presence: Presence, lastSeen: string }>>({});
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -92,6 +100,18 @@ export default function Chat() {
       fetchUsersWithMessages();
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!session || users.length === 0) return;
+
+    fetchPresences(users.map(u => u.id));
+    
+    const intervalId = setInterval(() => {
+      fetchPresences(users.map(u => u.id));
+    }, 10000);
+    
+    return () => clearInterval(intervalId);
+  }, [session, users.length]);
 
   const fetchUsers = async () => {
     const response = await fetch('/api/users');
@@ -282,6 +302,49 @@ export default function Chat() {
     }
   };
 
+  const fetchPresences = async (userIds: string[]) => {
+    try {
+      const response = await fetch('/api/users/presence', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUserPresences(
+          data.reduce((acc: Record<string, { presence: Presence, lastSeen: string }>, user: { user_id: string, presence: Presence, last_seen: string }) => ({
+            ...acc,
+            [user.user_id]: {
+              presence: user.presence,
+              lastSeen: user.last_seen
+            }
+          }), {})
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching presences:', error);
+    }
+  };
+
+  const PresenceIndicator = ({ presence }: { presence: Presence }) => {
+    const colors = {
+      online: 'bg-green-500',
+      offline: 'bg-gray-500',
+      away: 'bg-yellow-500',
+      busy: 'bg-red-500',
+      invisible: 'bg-gray-300'
+    };
+
+    return (
+      <div 
+        className={`w-3 h-3 rounded-full ${colors[presence]} mr-2`}
+        title={presence.charAt(0).toUpperCase() + presence.slice(1)}
+      />
+    );
+  };
+
   const renderUser = (user: SafeUser) => (
     <li 
       key={user.id}
@@ -297,7 +360,8 @@ export default function Chat() {
       })}
     >
       <div className="flex items-center">
-        {user.name} (@{user.username})
+        <PresenceIndicator presence={userPresences[user.id]?.presence || 'offline'} />
+        @{user.username}
       </div>
     </li>
   );
@@ -462,8 +526,16 @@ export default function Chat() {
                             ? 'bg-gray-700' 
                             : 'hover:bg-gray-700'
                         }`}
+                        onClick={() => handleConversationSelect({
+                          id: user.id,
+                          type: 'direct',
+                          name: user.name || ''
+                        })}
                       >
-                        {user.name} (@{user.username})
+                        <div className="flex items-center">
+                          <PresenceIndicator presence={userPresences[user.id]?.presence || 'offline'} />
+                          {user.name} (@{user.username})
+                        </div>
                       </li>
                     ))}
                 </ul>
@@ -499,7 +571,10 @@ export default function Chat() {
                           name: user.name || ''
                         })}
                       >
-                        @{user.username}
+                        <div className="flex items-center">
+                          <PresenceIndicator presence={userPresences[user.id]?.presence || 'offline'} />
+                          {user.name} (@{user.username})
+                        </div>
                       </li>
                     ))}
                 </ul>

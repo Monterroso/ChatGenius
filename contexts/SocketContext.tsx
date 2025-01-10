@@ -60,8 +60,41 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     setSocket(socketInstance);
 
+    const activityEvents = ['mousemove', 'keydown'];
+    let inactivityTimeout: NodeJS.Timeout;
+    let currentPresence = 'offline'; // Track current presence state
+
+    const resetInactivityTimeout = () => {
+      clearTimeout(inactivityTimeout);
+      // Only emit 'online' if current presence isn't already 'online'
+      if (currentPresence !== 'online') {
+        console.log(`User ${session.user.name} is online from activity`);
+        socketInstance.emit('userPresenceChanged', { presence: 'online' });
+        currentPresence = 'online';
+      }
+      
+      inactivityTimeout = setTimeout(() => {
+        console.log(`User ${session.user.name} is away from activity`);
+        socketInstance.emit('userPresenceChanged', { presence: 'away' });
+        currentPresence = 'away';
+      }, 10000); // 5 minutes
+    };
+
+    activityEvents.forEach(event => {     
+      window.addEventListener(event, resetInactivityTimeout);
+    });
+
+    resetInactivityTimeout(); // Initialize the timeout
+
     return () => {
       socketInstance.disconnect();
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, () => {
+          console.log(`Activity detected: ${event}`);
+          resetInactivityTimeout();
+        });
+      });
+      clearTimeout(inactivityTimeout);
       console.log('Socket cleanup complete');
     };
   }, [session]);

@@ -12,15 +12,9 @@ export async function GET() {
     ['invisible']
   );
   
-  const userPresences = result.rows.reduce((acc, user) => {
-    acc[user.user_id] = {
-      presence: user.presence,
-      lastSeen: user.last_seen
-    };
-    return acc;
-  }, {});
-
-  return NextResponse.json(userPresences);
+  // Return the rows directly - they already have the correct format:
+  // { user_id: string, presence: string, last_seen: string }[]
+  return NextResponse.json(result.rows);
 }
 
 // Update user presence
@@ -46,12 +40,14 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Use upsert (INSERT ... ON CONFLICT DO UPDATE) to handle both creation and updates
+    // Use upsert and update last_seen timestamp
     await db.query(
-      `INSERT INTO user_presence (user_id, presence)
-       VALUES ($1, $2)
+      `INSERT INTO user_presence (user_id, presence, last_seen)
+       VALUES ($1, $2, NOW())
        ON CONFLICT (user_id) 
-       DO UPDATE SET presence = $2`,
+       DO UPDATE SET 
+         presence = $2,
+         last_seen = NOW()`,
       [session.user.id, presence]
     );
 
