@@ -5,44 +5,59 @@ const OFFLINE_THRESHOLD = 1000 * 60 * 5; // 5 minutes
 export function calculateEffectiveStatus(status: UserStatus): EffectiveStatus {
   // Remove stale devices
   const activeDevices = status.devices.filter(device => {
-    const lastActive = new Date(device.lastActive).getTime();
+    const lastActive = new Date(device.last_active).getTime();
     return Date.now() - lastActive < OFFLINE_THRESHOLD;
   });
+
+  // Get the most recently active device
+  const mostRecentDevice = activeDevices.length > 0 
+    ? activeDevices.reduce((latest, current) => {
+        const latestTime = new Date(latest.last_active).getTime();
+        const currentTime = new Date(current.last_active).getTime();
+        return currentTime > latestTime ? current : latest;
+      })
+    : null;
+    
+  console.log("Active devices:", status.devices);
 
   // User is offline if no active devices
   if (activeDevices.length === 0) {
     return {
-      userId: status.userId,
+      userId: status.user_id,
       status: 'offline',
       isOnline: false,
-      lastSeen: status.lastSeen
+      lastSeen: status.last_seen,
+      deviceId: null
     };
   }
 
   // User appears offline if invisible
   if (status.invisible) {
     return {
-      userId: status.userId,
+      userId: status.user_id,
       status: 'offline',
       isOnline: true,
-      lastSeen: status.lastSeen
+      lastSeen: status.last_seen,
+      deviceId: mostRecentDevice?.id || null
     };
   }
 
   // Manual status takes precedence over auto status
-  if (status.manualStatus) {
+  if (status.manual_status) {
     return {
-      userId: status.userId,
-      status: status.manualStatus,
+      userId: status.user_id,
+      status: status.manual_status,
       isOnline: true,
-      lastSeen: status.lastSeen
+      lastSeen: status.last_seen,
+      deviceId: mostRecentDevice?.id || null
     };
   }
 
   return {
-    userId: status.userId,
-    status: status.autoStatus,
-    isOnline: status.autoStatus !== 'offline',
-    lastSeen: status.lastSeen
+    userId: status.user_id,
+    status: status.auto_status,
+    isOnline: status.auto_status !== 'offline',
+    lastSeen: status.last_seen,
+    deviceId: mostRecentDevice?.id || null
   };
 } 

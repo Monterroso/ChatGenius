@@ -97,9 +97,9 @@ export async function POST(req: Request) {
       [userResult.rows[0].id, primaryGroupId]
     );
 
-    // Create initial presence record for the user
+    // Create initial status record for the user
     await db.query(
-      'INSERT INTO user_presence (user_id, presence) VALUES ($1, $2)',
+      'INSERT INTO user_status (user_id, status) VALUES ($1, $2)',
       [userResult.rows[0].id, 'offline']
     );
 

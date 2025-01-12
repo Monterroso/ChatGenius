@@ -16,6 +16,7 @@ declare module 'next-auth' {
       name: string;
       username: string;
     } & DefaultSession['user']
+    token?: JWT;
   }
 }
 
@@ -72,6 +73,7 @@ export const authOptions: NextAuthOptions = {
         session.user.name = token.name as string;
         session.user.username = token.username as string;
       }
+      session.token = token as unknown as JWT;
       return session;
     }
   },

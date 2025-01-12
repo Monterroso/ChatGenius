@@ -63,22 +63,24 @@ export type DBUser = {
 
   export interface UserDevice {
     id: string;
-    lastActive: string;
-    userAgent: string;
+    last_active: string;
+    user_agent: string;
+    status?: string;
   }
 
   export interface UserStatus {
-    userId: string;
-    manualStatus?: string | null;
-    autoStatus: AutoStatus;
+    user_id: string;
+    manual_status: string | null;
+    auto_status: AutoStatus;
     invisible: boolean;
-    lastSeen: string;
+    last_seen: string;
     devices: UserDevice[];
   }
 
   export interface EffectiveStatus {
     userId: string;
     status: string;
+    deviceId: string | null;
     isOnline: boolean;
     lastSeen: string;
   }

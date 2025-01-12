@@ -5,6 +5,12 @@ import { io, Socket } from 'socket.io-client';
 import { useSession } from 'next-auth/react';
 import { EffectiveStatus } from '@/types/db';
 
+const AUTO_STATUS = {
+  ONLINE: 'online',
+  AWAY: 'away',
+  OFFLINE: 'offline',
+} as const;
+
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
@@ -59,13 +65,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       withCredentials: true,
       transports: ['websocket', 'polling'],
       auth: {
-        userId: session.user.id
+        userId: session.user.id,
+        session: session
       }
     });
 
     socketInstance.on('connect', () => {
       console.log('Socket connected:', socketInstance.id);
       setIsConnected(true);
+      fetchInitialStatuses();
     });
 
     socketInstance.on('connect_error', (error) => {
@@ -77,62 +85,58 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setIsConnected(false);
     });
 
-    socketInstance.on('userPresenceChanged', (data) => {
-      console.log('User presence update:', data.userId, '->', data.presence);
+    socketInstance.on('statusChanged', (status: EffectiveStatus) => {
+      console.log('User status update:', status.userId, '->', status.status);
+
+      setUserStatuses(prev => new Map(prev).set(status.userId, status));
     });
 
     setSocket(socketInstance);
 
     const activityEvents = ['mousemove', 'keydown'];
     let inactivityTimeout: NodeJS.Timeout;
-    let currentPresence = 'offline'; // Track current presence state
+    type AutoStatus = typeof AUTO_STATUS[keyof typeof AUTO_STATUS];
+    let currentStatus: AutoStatus = AUTO_STATUS.OFFLINE;
 
     const resetInactivityTimeout = () => {
       clearTimeout(inactivityTimeout);
-      // Only emit 'online' if current presence isn't already 'online'
-      if (currentPresence !== 'online') {
+      if (currentStatus !== AUTO_STATUS.ONLINE) {
         console.log(`User ${session.user.name} is online from activity`);
-        socketInstance.emit('userPresenceChanged', { presence: 'online' });
-        currentPresence = 'online';
+        console.log('Socket ID:', socketInstance.id);
+        socketInstance.emit('statusChanged', { 
+          userId: session.user.id,
+          deviceId: socketInstance.id,
+          autoStatus: AUTO_STATUS.ONLINE 
+        });
+        currentStatus = AUTO_STATUS.ONLINE;
       }
       
       inactivityTimeout = setTimeout(() => {
         console.log(`User ${session.user.name} is away from activity`);
-        socketInstance.emit('userPresenceChanged', { presence: 'away' });
-        currentPresence = 'away';
-      }, 10000); // 5 minutes
+        console.log('Socket ID:', socketInstance.id);
+        socketInstance.emit('statusChanged', {
+          userId: session.user.id,
+          deviceId: socketInstance.id,
+          autoStatus: AUTO_STATUS.AWAY
+        });
+        currentStatus = AUTO_STATUS.AWAY;
+      }, 600000);
     };
 
     activityEvents.forEach(event => {     
       window.addEventListener(event, resetInactivityTimeout);
     });
 
-    resetInactivityTimeout(); // Initialize the timeout
+    resetInactivityTimeout();
 
-    return () => {
-      socketInstance.disconnect();
-      activityEvents.forEach(event => {
-        window.removeEventListener(event, () => {
-          console.log(`Activity detected: ${event}`);
-          resetInactivityTimeout();
-        });
-      });
-      clearTimeout(inactivityTimeout);
-      console.log('Socket cleanup complete');
-    };
-  }, [session]);
-
-  useEffect(() => {
-    if (!session?.user?.id) return;
-
-    // Fetch initial statuses when socket connects
     const fetchInitialStatuses = async () => {
       try {
         const response = await fetch('/api/users/status');
         if (response.ok) {
           const statuses = await response.json();
-          setUserStatuses(new Map(statuses.map((status: EffectiveStatus) => 
-            [status.userId, status]
+          console.log('Initial statuses:', statuses);
+          setUserStatuses(new Map(Object.entries(statuses).map(([userId, status]: [string, any]) => 
+            [userId, { ...status, userId }]
           )));
         }
       } catch (error) {
@@ -140,21 +144,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    if (socket) {
-      console.log('Socket connected, fetching initial statuses');
-      fetchInitialStatuses();
-
-      socket.on('statusChanged', (status: EffectiveStatus) => {
-        setUserStatuses(prev => new Map(prev).set(status.userId, status));
-      });
-    }
-
     return () => {
-      if (socket) {
-        socket.off('statusChanged');
-      }
+      socketInstance.disconnect();
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, resetInactivityTimeout);
+      });
+      clearTimeout(inactivityTimeout);
+      console.log('Socket cleanup complete');
     };
-  }, [socket, session]);
+  }, [session]);
 
   return (
     <SocketContext.Provider value={{

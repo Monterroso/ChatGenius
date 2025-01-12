@@ -62,6 +62,64 @@ const GroupInviteButton = ({ inviteId, onGroupJoined }: GroupInviteButtonProps) 
   );
 };
 
+const CurrentUserStatus = () => {
+  const { data: session } = useSession();
+  const { userStatuses } = useSocket();
+  const [status, setStatus] = useState<EffectiveStatus | null>(null);
+
+  useEffect(() => {
+    const fetchStatus = async () => {
+      if (!session?.user?.id) return;
+      
+      try {
+        const response = await fetch(`/api/users/${session.user.id}/status`);
+        if (response.ok) {
+          const data = await response.json();
+          setStatus(data);
+        }
+      } catch (error) {
+        console.error('Error fetching user status:', error);
+      }
+    };
+
+    fetchStatus();
+  }, [session?.user?.id]);
+
+  // Update status when websocket updates come in
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const socketStatus = userStatuses.get(session.user.id);
+    if (socketStatus) {
+      setStatus(socketStatus);
+    }
+  }, [userStatuses, session?.user?.id]);
+
+  const colors: Record<string, string> = {
+    online: 'bg-green-500',
+    offline: 'bg-gray-500',
+    away: 'bg-yellow-500',
+    dnd: 'bg-red-500',
+    invisible: 'bg-gray-300'
+  };
+
+  const displayStatus = status?.status || 'offline';
+  const colorClass = colors[displayStatus] || colors.offline;
+
+  return (
+    <button 
+      className="w-14 mx-1 p-2 rounded-md hover:bg-gray-800 transition-colors text-center"
+      title={`Status: ${displayStatus}`}
+    >
+      <div className="flex flex-col items-center gap-2">
+        <div className={`w-3 h-3 rounded-full ${colorClass}`} />
+        <span className="text-xs text-white truncate w-full">
+          {session?.user?.username || 'User'}
+        </span>
+      </div>
+    </button>
+  );
+};
+
 export default function Chat() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -286,15 +344,6 @@ export default function Chat() {
 
   const StatusIndicator = ({ userId }: { userId: string }) => {
     const status = userStatuses.get(userId);
-    const username = users.find(u => u.id === userId)?.username;
-
-    if (status) {
-      console.debug(`Status [${username}]:`, {
-        status: status.status,
-        isOnline: status.isOnline,
-        lastSeen: new Date(status.lastSeen).toLocaleString()
-      });
-    }
 
     const colors: Record<string, string> = {
       online: 'bg-green-500',
@@ -310,7 +359,7 @@ export default function Chat() {
     return (
       <div 
         className={`w-3 h-3 rounded-full ${colorClass} mr-2`}
-        title={status ? `${displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}${status.isOnline ? '' : ` - Last seen: ${new Date(status.lastSeen).toLocaleString()}`}` : 'Offline'}
+        title={displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
       />
     );
   };
@@ -339,16 +388,10 @@ export default function Chat() {
   useEffect(() => {
     if (!socket) return;
 
-    console.log('Setting up socket listeners for status updates');
-
     const handleStatusChange = (status: EffectiveStatus) => {
-      console.log('Status change received:', {
-        userId: status.userId,
-        username: users.find(u => u.id === status.userId)?.username,
-        newStatus: status.status,
-        isOnline: status.isOnline,
-        lastSeen: new Date(status.lastSeen).toLocaleString()
-      });
+      userStatuses.set(status.userId, status);
+      // Force a re-render since Map mutations don't trigger updates
+      setUsers([...users]);
     };
 
     socket.on('statusChanged', handleStatusChange);
@@ -356,7 +399,7 @@ export default function Chat() {
     return () => {
       socket.off('statusChanged', handleStatusChange);
     };
-  }, [socket, users]);
+  }, [socket, userStatuses, users]);
 
   if (status === 'loading') {
     return (
@@ -376,9 +419,10 @@ export default function Chat() {
   return (
     <div className="flex h-screen">
       <div className="w-16 bg-gray-900 flex flex-col">
+        <div className="flex-grow" />
         <button
           onClick={() => signOut()}
-          className="mt-auto mb-4 mx-1 px-2 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-xs text-center"
+          className="mb-4 mx-1 px-2 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-xs text-center"
         >
           Logout
         </button>
@@ -505,9 +549,9 @@ export default function Chat() {
 
           <div className="flex-1 overflow-hidden flex flex-col">
             {selectedConversation?.type === 'group' && (
-              <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="mb-8">
                 <h2 className="text-xl font-bold mb-4">Group Members</h2>
-                <ul className="overflow-y-auto flex-1">
+                <ul className="overflow-y-auto max-h-40">
                   {users
                     .filter(user => groupMembers.some(member => member.user_id === user.id))
                     .map((user) => (
@@ -534,44 +578,46 @@ export default function Chat() {
               </div>
             )}
 
-            {selectedConversation?.type !== 'group' && (
-              <>
-                <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
-                  <span>Recent Contacts</span>
-                  <button
-                    onClick={() => setShowNewMessagePopup(true)}
-                    className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-                    title="New message"
-                  >
-                    +
-                  </button>
-                </h2>
-                <ul className="overflow-y-auto flex-1">
-                  {users
-                    .filter(user => usersWithMessages.has(user.id))
-                    .map((user) => (
-                      <li 
-                        key={user.id}
-                        className={`mb-2 p-2 rounded cursor-pointer ${
-                          selectedConversation?.id === user.id 
-                            ? 'bg-gray-700' 
-                            : 'hover:bg-gray-700'
-                        }`}
-                        onClick={() => handleConversationSelect({
-                          id: user.id,
-                          type: 'direct',
-                          name: user.name || ''
-                        })}
-                      >
-                        <div className="flex items-center">
-                          <StatusIndicator userId={user.id} />
-                          {user.name} (@{user.username})
-                        </div>
-                      </li>
-                    ))}
-                </ul>
-              </>
-            )}
+            <div className="flex-1 overflow-hidden">
+              <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                <span>Recent Contacts</span>
+                <button
+                  onClick={() => setShowNewMessagePopup(true)}
+                  className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                  title="New message"
+                >
+                  +
+                </button>
+              </h2>
+              <ul className="overflow-y-auto flex-1">
+                {users
+                  .filter(user => usersWithMessages.has(user.id))
+                  .map((user) => (
+                    <li 
+                      key={user.id}
+                      className={`mb-2 p-2 rounded cursor-pointer ${
+                        selectedConversation?.id === user.id 
+                          ? 'bg-gray-700' 
+                          : 'hover:bg-gray-700'
+                      }`}
+                      onClick={() => handleConversationSelect({
+                        id: user.id,
+                        type: 'direct',
+                        name: user.name || ''
+                      })}
+                    >
+                      <div className="flex items-center">
+                        <StatusIndicator userId={user.id} />
+                        {user.name} (@{user.username})
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <CurrentUserStatus />
           </div>
         </div>
       </div>

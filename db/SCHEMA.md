@@ -13,7 +13,7 @@ Stores user account information
 - `updated_at`: TIMESTAMP
 
 ### User Status
-Tracks user presence and status information
+Tracks user status and status information
 - `user_id`: UUID (Primary Key, references users.id)
 - `manual_status`: TEXT (User-set status message)
 - `auto_status`: TEXT (System-determined status: online/offline/away)
