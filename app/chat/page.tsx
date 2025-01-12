@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus } from '@/types/db';
 import { useSocket } from '@/contexts/SocketContext';
+import { useMessagePolling } from '@/hooks/useMessagePolling';
 
 interface GroupInviteButtonProps {
   inviteId: string;
@@ -124,7 +125,6 @@ export default function Chat() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [users, setUsers] = useState<SafeUser[]>([]);
-  const [messages, setMessages] = useState<DBMessage[]>([]);
   const [message, setMessage] = useState('');
   const [groups, setGroups] = useState<DBGroup[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -137,6 +137,12 @@ export default function Chat() {
   const [newGroupName, setNewGroupName] = useState('');
   const [messageError, setMessageError] = useState(false);
   const { socket, userStatuses } = useSocket();
+  const {
+    messages,
+    setMessages,
+    isPolling,
+    error: pollingError
+  } = useMessagePolling(selectedConversation);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -147,7 +153,6 @@ export default function Chat() {
   useEffect(() => {
     if (session) {
       fetchUsers();
-      fetchMessages();
       fetchGroups();
       fetchUsersWithMessages();
     }
@@ -161,16 +166,18 @@ export default function Chat() {
     }
   };
 
-  const fetchMessages = async (conversationId?: string, type?: 'group' | 'direct') => {
-    if (!conversationId || !type) return;
-    
+  const fetchMessages = async (conversationId: string, type: 'group' | 'direct') => {
     const queryParam = type === 'group' ? 'groupId' : 'userId';
     const url = `/api/messages?${queryParam}=${conversationId}`;
     
-    const response = await fetch(url);
-    if (response.ok) {
-      const data = await response.json();
-      setMessages(data);
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data);
+      }
+    } catch (error) {
+      console.error('Error fetching initial messages:', error);
     }
   };
 
