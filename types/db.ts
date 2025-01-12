@@ -84,3 +84,11 @@ export type DBUser = {
     isOnline: boolean;
     lastSeen: string;
   }
+
+  export interface UserMood {
+    id: string;
+    user_id: string;
+    mood: string;
+    created_at: Date;
+    updated_at: Date;
+  }

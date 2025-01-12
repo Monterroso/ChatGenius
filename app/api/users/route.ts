@@ -25,11 +25,11 @@ export async function GET() {
   // Transform users to include effective status
   const safeUsers = users.map(user => {
     const status = user.user_id ? calculateEffectiveStatus({
-      userId: user.user_id,
-      manualStatus: user.manual_status,
-      autoStatus: user.auto_status || 'offline',
+      user_id: user.user_id,
+      manual_status: user.manual_status,
+      auto_status: user.auto_status || 'offline',
       invisible: user.invisible || false,
-      lastSeen: user.last_seen,
+      last_seen: user.last_seen,
       devices: user.devices || []
     }) : null;
 

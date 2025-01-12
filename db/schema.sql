@@ -78,3 +78,17 @@ CREATE TRIGGER update_user_status_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TABLE user_moods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) UNIQUE NOT NULL,
+    mood TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add trigger for updating the updated_at timestamp
+CREATE TRIGGER update_user_moods_updated_at
+    BEFORE UPDATE ON user_moods
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+

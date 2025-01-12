@@ -3,9 +3,10 @@
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus } from '@/types/db';
+import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood } from '@/types/db';
 import { useSocket } from '@/contexts/SocketContext';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
+import { useMoodPolling } from '@/hooks/useMoodPolling';
 
 interface GroupInviteButtonProps {
   inviteId: string;
@@ -67,6 +68,8 @@ const CurrentUserStatus = () => {
   const { data: session } = useSession();
   const { userStatuses } = useSocket();
   const [status, setStatus] = useState<EffectiveStatus | null>(null);
+  const [currentMood, setCurrentMood] = useState('');
+  const [displayedMood, setDisplayedMood] = useState('');
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -83,7 +86,22 @@ const CurrentUserStatus = () => {
       }
     };
 
+    const fetchMood = async () => {
+      if (!session?.user?.id) return;
+      
+      try {
+        const response = await fetch(`/api/mood/${session.user.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setDisplayedMood(data.mood || '');
+        }
+      } catch (error) {
+        console.error('Error fetching mood:', error);
+      }
+    };
+
     fetchStatus();
+    fetchMood();
   }, [session?.user?.id]);
 
   // Update status when websocket updates come in
@@ -106,20 +124,115 @@ const CurrentUserStatus = () => {
   const displayStatus = status?.status || 'offline';
   const colorClass = colors[displayStatus] || colors.offline;
 
+  const updateMood = async () => {
+    try {
+      await fetch('/api/mood', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mood: currentMood })
+      });
+      setDisplayedMood(currentMood);
+      setCurrentMood('');
+    } catch (error) {
+      console.error('Error updating mood:', error);
+    }
+  };
+
   return (
-    <button 
-      className="w-14 mx-1 p-2 rounded-md hover:bg-gray-800 transition-colors text-center"
-      title={`Status: ${displayStatus}`}
-    >
-      <div className="flex flex-col items-center gap-2">
-        <div className={`w-3 h-3 rounded-full ${colorClass}`} />
-        <span className="text-xs text-white truncate w-full">
-          {session?.user?.username || 'User'}
-        </span>
+    <div className="flex flex-col gap-2">
+      <div className="w-full p-2 rounded-md hover:bg-gray-800 transition-colors">
+        <div className="flex items-center gap-2">
+          <div className={`w-3 h-3 rounded-full ${colorClass}`} />
+          <div className="flex flex-col">
+            <span className="text-sm text-white">
+              {session?.user?.username || 'User'}
+            </span>
+            {displayedMood && (
+              <span className="text-xs text-gray-400">
+                {displayedMood}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
-    </button>
+      
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={currentMood}
+          onChange={(e) => setCurrentMood(e.target.value)}
+          placeholder="Set mood..."
+          className="w-full px-2 py-1 text-sm bg-gray-700 rounded"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              updateMood();
+            }
+          }}
+        />
+        <button
+          onClick={updateMood}
+          className="px-2 py-1 text-xs bg-primary rounded hover:bg-primary/90"
+        >
+          Set
+        </button>
+      </div>
+    </div>
   );
 };
+
+const StatusIndicator = ({ userId }: { userId: string }) => {
+  const { userStatuses } = useSocket();
+  const status = userStatuses.get(userId);
+
+  const colors: Record<string, string> = {
+    online: 'bg-green-500',
+    offline: 'bg-gray-500',
+    away: 'bg-yellow-500',
+    dnd: 'bg-red-500',
+    invisible: 'bg-gray-300'
+  };
+
+  const displayStatus = status?.status || 'offline';
+  const colorClass = colors[displayStatus] || colors.offline;
+
+  return (
+    <div 
+      className={`w-3 h-3 rounded-full ${colorClass} mr-2`}
+      title={displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
+    />
+  );
+};
+
+const UserListItem = ({ 
+  user, 
+  isSelected, 
+  onClick,
+  moods 
+}: { 
+  user: SafeUser; 
+  isSelected: boolean; 
+  onClick: () => void;
+  moods: Map<string, UserMood>;
+}) => (
+  <li 
+    className={`mb-2 p-2 rounded cursor-pointer ${
+      isSelected ? 'bg-gray-700' : 'hover:bg-gray-700'
+    }`}
+    onClick={onClick}
+  >
+    <div className="flex items-center">
+      <StatusIndicator userId={user.id} />
+      <div className="flex flex-col">
+        <span>{user.name} (@{user.username})</span>
+        {moods.get(user.id) && (
+          <span className="text-xs text-gray-400">
+            {moods.get(user.id)?.mood}
+          </span>
+        )}
+      </div>
+    </div>
+  </li>
+);
 
 export default function Chat() {
   const { data: session, status } = useSession();
@@ -143,6 +256,27 @@ export default function Chat() {
     isPolling,
     error: pollingError
   } = useMessagePolling(selectedConversation);
+
+  const visibleUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    
+    // Add users from messages
+    messages.forEach(msg => ids.add(msg.sender_id));
+    
+    // Add users from groups if viewing a group
+    if (selectedConversation?.type === 'group') {
+      groupMembers.forEach(member => ids.add(member.user_id));
+    }
+    
+    // Add selected conversation user if it's a direct message
+    if (selectedConversation?.type === 'direct') {
+      ids.add(selectedConversation.id);
+    }
+    
+    return Array.from(ids);
+  }, [messages, groupMembers, selectedConversation]);
+
+  const { moods } = useMoodPolling(visibleUserIds);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -349,28 +483,6 @@ export default function Chat() {
     }
   };
 
-  const StatusIndicator = ({ userId }: { userId: string }) => {
-    const status = userStatuses.get(userId);
-
-    const colors: Record<string, string> = {
-      online: 'bg-green-500',
-      offline: 'bg-gray-500',
-      away: 'bg-yellow-500',
-      dnd: 'bg-red-500',
-      invisible: 'bg-gray-300'
-    };
-
-    const displayStatus = status?.status || 'offline';
-    const colorClass = colors[displayStatus] || colors.offline;
-
-    return (
-      <div 
-        className={`w-3 h-3 rounded-full ${colorClass} mr-2`}
-        title={displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
-      />
-    );
-  };
-
   const renderUser = (user: SafeUser) => (
     <li 
       key={user.id}
@@ -387,7 +499,14 @@ export default function Chat() {
     >
       <div className="flex items-center">
         <StatusIndicator userId={user.id} />
-        @{user.username}
+        <div className="flex flex-col">
+          <span>@{user.username}</span>
+          {moods.get(user.id) && (
+            <span className="text-xs text-gray-400">
+              {moods.get(user.id)?.mood}
+            </span>
+          )}
+        </div>
       </div>
     </li>
   );
@@ -562,24 +681,17 @@ export default function Chat() {
                   {users
                     .filter(user => groupMembers.some(member => member.user_id === user.id))
                     .map((user) => (
-                      <li 
+                      <UserListItem
                         key={user.id}
-                        className={`mb-2 p-2 rounded cursor-pointer ${
-                          selectedConversation?.id === user.id 
-                            ? 'bg-gray-700' 
-                            : 'hover:bg-gray-700'
-                        }`}
+                        user={user}
+                        moods={moods}
+                        isSelected={selectedConversation?.id === user.id}
                         onClick={() => handleConversationSelect({
                           id: user.id,
                           type: 'direct',
                           name: user.name || ''
                         })}
-                      >
-                        <div className="flex items-center">
-                          <StatusIndicator userId={user.id} />
-                          {user.name} (@{user.username})
-                        </div>
-                      </li>
+                      />
                     ))}
                 </ul>
               </div>
@@ -600,24 +712,17 @@ export default function Chat() {
                 {users
                   .filter(user => usersWithMessages.has(user.id))
                   .map((user) => (
-                    <li 
+                    <UserListItem
                       key={user.id}
-                      className={`mb-2 p-2 rounded cursor-pointer ${
-                        selectedConversation?.id === user.id 
-                          ? 'bg-gray-700' 
-                          : 'hover:bg-gray-700'
-                      }`}
+                      user={user}
+                      moods={moods}
+                      isSelected={selectedConversation?.id === user.id}
                       onClick={() => handleConversationSelect({
                         id: user.id,
                         type: 'direct',
                         name: user.name || ''
                       })}
-                    >
-                      <div className="flex items-center">
-                        <StatusIndicator userId={user.id} />
-                        {user.name} (@{user.username})
-                      </div>
-                    </li>
+                    />
                   ))}
               </ul>
             </div>

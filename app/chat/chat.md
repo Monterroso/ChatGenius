@@ -1,7 +1,7 @@
 # Chat Page Documentation
 
 ## Overview
-The chat page is a messaging interface that combines WebSocket connections for live status updates with REST API calls for message and group management.
+The chat page is a messaging interface that combines WebSocket connections for live status updates with REST API calls and polling mechanisms for message, mood, and group management.
 
 ## Layout Structure
 The page is divided into three main sections:
@@ -18,69 +18,101 @@ The page is divided into three main sections:
   1. Client connects/disconnects → WebSocket event → Database update → Broadcast to all clients
   2. Manual status changes → API call → Database update → WebSocket broadcast
 - Supported statuses: online, offline, away, dnd (do not disturb), invisible
-- Status indicators use color coding:
-  - Green: Online
-  - Gray: Offline
-  - Yellow: Away
-  - Red: Do Not Disturb
-  - Light Gray: Invisible
+
+### Mood System
+- Mood updates via polling mechanism using `useMoodPolling` hook
+- Default 3-second polling interval (configurable)
+- Moods stored in `user_moods` table
+- Mood operations:
+  1. Set mood: POST to `/api/mood`
+  2. Get mood: GET from `/api/mood/${userId}`
+  3. Delete mood: DELETE from `/api/mood/${userId}`
+- Efficient polling:
+  - Only polls for visible users
+  - Uses memoization to prevent unnecessary requests
+  - Automatic cleanup on component unmount
+- Display locations:
+  - Under usernames in contact list
+  - In group member list
+  - In current user's status
+
+### Message Updates
+- Polling mechanism via `useMessagePolling` hook
+- Default 3-second polling interval (configurable)
+- Efficient updates using message ID tracking
+- Supports both direct messages and group chats
+- Automatic merging of new messages with existing ones
+- Polling cleanup on component unmount
 
 ### Groups
 - Group operations use REST API calls to database
 - Create groups: POST to `/api/groups`
 - Fetch groups: GET from `/api/groups/member`
 - Member management: Database queries via `/api/groups/${id}/members`
+- Message updates via polling system
 - Invite system:
   - Generate: POST to `/api/groups/${id}/invites`
   - Accept: POST to `/api/invites/${id}/accept`
-  - No WebSocket implementation for group updates (requires page refresh)
 
 ### Direct Messages
 - Message sending: REST API calls to `/api/messages`
-- Message fetching: Database queries via `/api/messages?userId=${id}`
+- Message updates via polling system
 - Recent contacts: Database query to `/api/messages/contacts`
 - User search: Database query to `/api/users`
-- No WebSocket implementation for message delivery (requires manual refresh or polling)
 
 ## Data Flow
 
 ### Status Updates
 1. Client connects to WebSocket server
 2. Server queries database for initial status of all users
-3. Status changes:
-   - WebSocket events trigger database updates
-   - Database updates trigger WebSocket broadcasts
-   - Client updates UI based on WebSocket events
+3. Status changes via WebSocket events and database updates
+
+### Mood Updates
+1. Initial mood fetched on component mount
+2. Regular polling for visible users' moods:
+   - Tracks visible users via useMemo
+   - Only polls for users in view
+   - Updates mood Map with new data
+3. Mood changes:
+   - POST request to update mood
+   - Polling system picks up changes
+   - UI updates automatically
 
 ### Messages
 1. Messages stored in database via REST API
-2. Fetched through database queries
-3. No real-time delivery (future enhancement opportunity)
-4. Messages include:
+2. Regular polling checks for new messages:
+   - Tracks last message ID
+   - Only fetches newer messages
+   - Merges with existing messages
+   - Sorts by timestamp
+3. Messages include:
    - Sender information
    - Timestamp
-   - Content (with support for invite links)
+   - Content
    - Read/unread status
 
 ### Groups
 1. Group data fetched from database on initial load
 2. Group members loaded from database when selecting a group
-3. All group operations use database queries via REST API
-4. No WebSocket implementation for live updates
+3. Message updates handled by polling system
+4. Group operations via REST API
 
 ## State Management
 - User session managed via NextAuth
-- WebSocket context for status updates only
+- WebSocket context for status updates
+- Message polling hook for chat updates
+- Mood polling hook for mood updates
 - Local state for:
   - Selected conversation
   - Message history
   - User lists
   - Group information
+  - Current mood
 
 ## API Integration
 
 ### Database Queries (REST)
-- `/api/messages`: Message CRUD operations
+- `/api/messages`: Message CRUD operations with polling support
 - `/api/users`: User management and search
 - `/api/groups`: Group operations
 - `/api/invites`: Invitation handling
@@ -89,39 +121,56 @@ The page is divided into three main sections:
 ### WebSocket Events
 - `statusChanged`: Only used for status updates
 - Connection/disconnection handling
-- No WebSocket implementation for messages or group updates
 
 ## UI Components
 
 ### CurrentUserStatus
 - Initial status fetched from database
 - Updates received via WebSocket
-- Updates persisted to database
+- Mood updates via API and polling
+- Displays:
+  - Online status indicator
+  - Username
+  - Current mood
+  - Mood input field
 
-### GroupInviteButton
-- Pure database operations
-- No WebSocket integration
-- Requires page refresh for updates
+### UserListItem
+- Reusable component for user display
+- Shows:
+  - Status indicator
+  - Username
+  - Current mood
+- Used in:
+  - Recent contacts
+  - Group members list
+
+### ChatArea
+- Uses `useMessagePolling` hook
+- Supports both direct and group messages
+- Automatic message updates
+- Efficient message merging
 
 ### StatusIndicator
 - WebSocket-driven updates
 - Backed by database persistence
 - Real-time status reflection
 
-## Error Handling
-- Failed message delivery indicators (API response based)
-- Error states for network issues
-- Graceful degradation for offline functionality
-- User feedback for all operations
-
 ## Performance Considerations
-- Debounced status updates to reduce database writes
-- Optimized re-renders
-- Efficient WebSocket connection management
-- Pagination for message history (TODO)
+- Debounced status updates
+- Efficient polling with:
+  - Last message ID tracking
+  - Visible users only for moods
+  - Automatic cleanup
+- Optimized message merging
+- Configurable polling intervals
+- Memoized user lists
 
 ## Future Enhancements
-1. Implement WebSocket for message delivery
+1. Implement WebSocket for message delivery (alternative to polling)
 2. Add WebSocket for group updates
 3. Add typing indicators via WebSocket
 4. Implement message read receipts
+5. Add WebSocket for mood updates (alternative to polling)
+6. Add mood history
+7. Add mood reactions
+8. Implement mood expiration
