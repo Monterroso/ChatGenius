@@ -7,6 +7,10 @@ import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoSta
 import { useSocket } from '@/contexts/SocketContext';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
 import { useMoodPolling } from '@/hooks/useMoodPolling';
+import { useStatusPolling } from '@/hooks/useStatusPolling';
+import { STATUS_COLORS } from '@/lib/constants';
+import { createDirectConversation, createGroupConversation } from '@/lib/chat-helpers';
+import { useTemporaryState } from '@/hooks/useTemporaryState';
 
 interface GroupInviteButtonProps {
   inviteId: string;
@@ -76,7 +80,7 @@ const CurrentUserStatus = () => {
       if (!session?.user?.id) return;
       
       try {
-        const response = await fetch(`/api/users/${session.user.id}/status`);
+        const response = await fetch(`/api/status/${session.user.id}`);
         if (response.ok) {
           const data = await response.json();
           setStatus(data);
@@ -180,20 +184,9 @@ const CurrentUserStatus = () => {
   );
 };
 
-const StatusIndicator = ({ userId }: { userId: string }) => {
-  const { userStatuses } = useSocket();
-  const status = userStatuses.get(userId);
-
-  const colors: Record<string, string> = {
-    online: 'bg-green-500',
-    offline: 'bg-gray-500',
-    away: 'bg-yellow-500',
-    dnd: 'bg-red-500',
-    invisible: 'bg-gray-300'
-  };
-
+const StatusIndicator = ({ status }: { status?: EffectiveStatus }) => {
   const displayStatus = status?.status || 'offline';
-  const colorClass = colors[displayStatus] || colors.offline;
+  const colorClass = STATUS_COLORS[displayStatus] || STATUS_COLORS.offline;
 
   return (
     <div 
@@ -207,12 +200,14 @@ const UserListItem = ({
   user, 
   isSelected, 
   onClick,
-  moods 
+  moods,
+  statuses 
 }: { 
   user: SafeUser; 
   isSelected: boolean; 
   onClick: () => void;
   moods: Map<string, UserMood>;
+  statuses: Map<string, EffectiveStatus>;
 }) => (
   <li 
     className={`mb-2 p-2 rounded cursor-pointer ${
@@ -221,7 +216,7 @@ const UserListItem = ({
     onClick={onClick}
   >
     <div className="flex items-center">
-      <StatusIndicator userId={user.id} />
+      <StatusIndicator status={statuses.get(user.id)} />
       <div className="flex flex-col">
         <span>{user.name} (@{user.username})</span>
         {moods.get(user.id) && (
@@ -235,47 +230,59 @@ const UserListItem = ({
 );
 
 export default function Chat() {
+  // Auth & routing
   const { data: session, status } = useSession();
   const router = useRouter();
+  
+  // Core data
   const [users, setUsers] = useState<SafeUser[]>([]);
   const [message, setMessage] = useState('');
   const [groups, setGroups] = useState<DBGroup[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [groupMembers, setGroupMembers] = useState<DBGroupMember[]>([]);
+  const [messages, setMessages] = useState<DBMessage[]>([]);
+  
+  // UI References & States
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [usersWithMessages, setUsersWithMessages] = useState<Set<string>>(new Set());
   const [showNewMessagePopup, setShowNewMessagePopup] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewGroupPopup, setShowNewGroupPopup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
-  const [messageError, setMessageError] = useState(false);
+  const [messageError, setMessageError] = useTemporaryState(2000);
+  
+  // Socket & Real-time Updates
   const { socket, userStatuses } = useSocket();
+
+  // Memoized Values
+  const visibleUserIds = useMemo(() => {
+    // Calculate which users are visible in current view
+    const ids = new Set<string>();
+    messages.forEach(msg => ids.add(msg.sender_id));
+    if (selectedConversation?.type === 'group') {
+      groupMembers.forEach(member => ids.add(member.user_id));
+    }
+    if (selectedConversation?.type === 'direct') {
+      ids.add(selectedConversation.id);
+    }
+    return Array.from(ids);
+  }, [messages, groupMembers, selectedConversation]);
+  
+  // Polling Hooks for Real-time Data
+  const { error: statusError, isPolling: isStatusPolling } = useStatusPolling(visibleUserIds);
   const {
-    messages,
-    setMessages,
+    messages: polledMessages,
+    setMessages: setPolledMessages,
     isPolling,
     error: pollingError
   } = useMessagePolling(selectedConversation);
 
-  const visibleUserIds = useMemo(() => {
-    const ids = new Set<string>();
-    
-    // Add users from messages
-    messages.forEach(msg => ids.add(msg.sender_id));
-    
-    // Add users from groups if viewing a group
-    if (selectedConversation?.type === 'group') {
-      groupMembers.forEach(member => ids.add(member.user_id));
-    }
-    
-    // Add selected conversation user if it's a direct message
-    if (selectedConversation?.type === 'direct') {
-      ids.add(selectedConversation.id);
-    }
-    
-    return Array.from(ids);
-  }, [messages, groupMembers, selectedConversation]);
+  // Update messages when polling brings new ones
+  useEffect(() => {
+    setMessages(polledMessages);
+  }, [polledMessages]);
 
+  const { statuses } = useStatusPolling(visibleUserIds);
   const { moods } = useMoodPolling(visibleUserIds);
 
   useEffect(() => {
@@ -360,13 +367,11 @@ export default function Chat() {
         setMessage('');
         fetchMessages(selectedConversation.id, selectedConversation.type);
       } else {
-        setMessageError(true);
-        setTimeout(() => setMessageError(false), 2000); // Reset after 2 seconds
+        setMessageError();
       }
     } catch (error) {
       console.error('Failed to send message:', error);
-      setMessageError(true);
-      setTimeout(() => setMessageError(false), 2000); // Reset after 2 seconds
+      setMessageError();
     }
   };
 
@@ -482,34 +487,6 @@ export default function Chat() {
       alert('Failed to create group');
     }
   };
-
-  const renderUser = (user: SafeUser) => (
-    <li 
-      key={user.id}
-      className={`mb-2 p-2 rounded cursor-pointer ${
-        selectedConversation?.id === user.id 
-          ? 'bg-gray-700' 
-          : 'hover:bg-gray-700'
-      }`}
-      onClick={() => handleConversationSelect({
-        id: user.id,
-        type: 'direct',
-        name: user.name || ''
-      })}
-    >
-      <div className="flex items-center">
-        <StatusIndicator userId={user.id} />
-        <div className="flex flex-col">
-          <span>@{user.username}</span>
-          {moods.get(user.id) && (
-            <span className="text-xs text-gray-400">
-              {moods.get(user.id)?.mood}
-            </span>
-          )}
-        </div>
-      </div>
-    </li>
-  );
 
   useEffect(() => {
     if (!socket) return;
@@ -685,12 +662,9 @@ export default function Chat() {
                         key={user.id}
                         user={user}
                         moods={moods}
+                        statuses={userStatuses}
                         isSelected={selectedConversation?.id === user.id}
-                        onClick={() => handleConversationSelect({
-                          id: user.id,
-                          type: 'direct',
-                          name: user.name || ''
-                        })}
+                        onClick={() => handleConversationSelect(createDirectConversation(user))}
                       />
                     ))}
                 </ul>
@@ -716,12 +690,9 @@ export default function Chat() {
                       key={user.id}
                       user={user}
                       moods={moods}
+                      statuses={userStatuses}
                       isSelected={selectedConversation?.id === user.id}
-                      onClick={() => handleConversationSelect({
-                        id: user.id,
-                        type: 'direct',
-                        name: user.name || ''
-                      })}
+                      onClick={() => handleConversationSelect(createDirectConversation(user))}
                     />
                   ))}
               </ul>

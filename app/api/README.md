@@ -173,16 +173,16 @@
 
 ## Socket Server (WebSocket)
 - Runs on port 3001 (configurable via `SOCKET_PORT`)
-- Handles real-time presence updates:
+- Handles real-time status updates:
   - User connections/disconnections
-  - Presence changes ('online', 'offline', etc.)
+  - Status changes ('online', 'offline', etc.)
 - Events:
   - `connection`: New socket connection
-  - `presenceChange`: User updates their presence
+  - `statusChange`: User updates their status
   - `disconnect`: Socket disconnection
 - Emits:
-  - `userPresenceChanged`: `{ userId: string, presence: string }`
-  - `initialPresences`: Current presence state for all users
+  - `userStatusChanged`: `{ userId: string, status: string }`
+  - `initialStatuss`: Current status state for all users
 - CORS configured to match Next.js app URL
   - Uses `NEXT_PUBLIC_APP_URL` or defaults to `http://localhost:3000`
 
