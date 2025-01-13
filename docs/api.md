@@ -197,14 +197,11 @@
 ## Messages
 - `GET /api/messages`
   - Fetches messages filtered by:
-    - `groupId` - Group messages
-    - `userId` - Direct messages
-  - Returns last 50 messages
-  - Includes sender and receiver details
-  - Sorted by creation date (ASC)
-  - Query parameters:
-    - groupId?: string
-    - userId?: string
+    - groupId - For group messages
+    - userId - For direct messages
+  - One of groupId or userId is required (endpoint returns an error if neither is provided).
+  - Returns the last 50 messages.
+  - Sorted by creation date in ascending order (oldest first).
   - Response format:
     ```typescript
     Array<{
@@ -372,3 +369,72 @@
 - Password hashing with bcrypt
 - SQL injection protection via parameterized queries
 - Transaction support for data consistency
+
+## Reactions
+
+- `POST /api/reactions`
+  - Adds a reaction to a message.
+  - Required fields in request body:
+    ```typescript
+    {
+      messageId: string;
+      emoji: string;
+    }
+    ```
+  - Checks if the message exists (and is not deleted).
+  - Inserts a new reaction if not already present for (messageId, userId, emoji).
+  - Returns the updated list of reactions for the message:
+    ```typescript
+    {
+      reactions: Array<{
+        id: string;
+        message_id: string;
+        user_id: string;
+        emoji: string;
+        created_at: string;
+        name: string;
+        username: string;
+      }>
+    }
+    ```
+  - Requires authentication.
+
+- `DELETE /api/reactions`
+  - Removes a reaction from a message.
+  - Required fields in request body:
+    ```typescript
+    {
+      messageId: string;
+      emoji: string;
+    }
+    ```
+  - Deletes the specified reaction if it exists for (messageId, userId, emoji).
+  - Returns the updated list of reactions for the message:
+    ```typescript
+    {
+      reactions: Array<{
+        id: string;
+        message_id: string;
+        user_id: string;
+        emoji: string;
+        created_at: string;
+        name: string;
+        username: string;
+      }>
+    }
+    ```
+  - Requires authentication.
+
+- `GET /api/messages/[id]/reactions`
+  - Retrieves all reactions for the specified message, grouped by emoji.
+  - Response format:
+    ```typescript
+    {
+      reactions: Record<string, Array<{ 
+        userId: string; 
+        name: string; 
+        username: string; 
+      }>>;
+    }
+    ```
+  - Requires authentication.

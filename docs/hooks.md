@@ -263,3 +263,75 @@ function Notification() {
 
 --------------------------------------------------------------------------------
 
+## 7. useReactionPolling
+Handles polling for message reactions updates.
+
+• Implementation Details:  
+  - Polls /api/messages/{messageId}/reactions in parallel for each message ID.  
+  - Default 3-second polling interval (configurable).  
+  - Uses useEffect to manage the polling lifecycle.  
+  - Optimizes updates by only triggering state changes when reaction data has changed.  
+  - Catches and handles request failures gracefully.
+
+• Data Structures:  
+  - reactions: Record<string, {
+      [emoji: string]: Array<{
+        userId: string;
+        name: string;
+        username: string;
+      }>
+    }>  
+  - error: Error | null  
+  - isPolling: boolean  
+
+• Input Parameters:  
+  - messageIds: string[]  
+  - interval?: number (defaults to 3000)  
+  - enabled?: boolean (defaults to true)  
+
+• Returns:  
+  - reactions: Record<string, {
+      [emoji: string]: Array<{
+        userId: string;
+        name: string;
+        username: string;
+      }>
+    }>  
+  - error: Error | null  
+  - isPolling: boolean  
+
+Example Use:  
+--------------------------------------------------------------------------------
+function ChatMessages({ messageIds }: { messageIds: string[] }) {
+  const { reactions, error, isPolling } = useReactionPolling({
+    messageIds,
+    interval: 3000,
+    enabled: true
+  });
+
+  if (error) return <div>Error polling reactions!</div>;
+
+  return (
+    <div>
+      {messageIds.map((id) => {
+        const messageReactions = reactions[id] || {};
+        return (
+          <div key={id}>
+            {Object.entries(messageReactions).map(([emoji, users]) => (
+              <div key={emoji}>
+                {emoji}: {users.length} reactions
+                {users.map(user => (
+                  <span key={user.userId}>{user.name}</span>
+                ))}
+              </div>
+            ))}
+            {isPolling && <span>Updating...</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+--------------------------------------------------------------------------------
+

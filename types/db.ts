@@ -92,3 +92,22 @@ export interface UserMood {
   created_at: Date;
   updated_at: Date;
 }
+
+export interface MessageReaction {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
+  name: string;
+  username: string;
+}
+
+// Add a helper type for grouped reactions
+export interface GroupedReactions {
+  [emoji: string]: Array<{
+    userId: string;
+    name: string;
+    username: string;
+  }>;
+}

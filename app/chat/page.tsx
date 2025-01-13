@@ -3,7 +3,7 @@
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood } from '@/types/db';
+import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction } from '@/types/db';
 import { useSocket } from '@/contexts/SocketContext';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
 import { useMoodPolling } from '@/hooks/useMoodPolling';
@@ -11,6 +11,8 @@ import { useStatusPolling } from '@/hooks/useStatusPolling';
 import { STATUS_COLORS } from '@/lib/constants';
 import { createDirectConversation, createGroupConversation } from '@/lib/chat-helpers';
 import { useTemporaryState } from '@/hooks/useTemporaryState';
+import { MessageReactions } from '@/components/MessageReactions';
+import { useReactionPolling } from '@/hooks/useReactionPolling';
 
 interface GroupInviteButtonProps {
   inviteId: string;
@@ -229,6 +231,12 @@ const UserListItem = ({
   </li>
 );
 
+type GroupedReactions = Record<string, Array<{
+  userId: string;
+  name: string;
+  username: string;
+}>>;
+
 export default function Chat() {
   // Auth & routing
   const { data: session, status } = useSession();
@@ -241,6 +249,7 @@ export default function Chat() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [groupMembers, setGroupMembers] = useState<DBGroupMember[]>([]);
   const [messages, setMessages] = useState<DBMessage[]>([]);
+  const [messageReactions, setMessageReactions] = useState<Record<string, GroupedReactions>>({});
   
   // UI References & States
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -504,6 +513,69 @@ export default function Chat() {
     };
   }, [socket, userStatuses, users]);
 
+  const handleReactionSelect = async (messageId: string, emoji: string) => {
+    try {
+      const response = await fetch('/api/reactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, emoji })
+      });
+
+      if (response.ok) {
+        const { reactions } = await response.json();
+        setMessageReactions(prev => ({
+          ...prev,
+          [messageId]: reactions
+        }));
+      }
+    } catch (error) {
+      console.error('Error adding reaction:', error);
+    }
+  };
+
+  const handleReactionRemove = async (messageId: string, emoji: string) => {
+    try {
+      const response = await fetch('/api/reactions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, emoji })
+      });
+
+      if (response.ok) {
+        const { reactions } = await response.json();
+        setMessageReactions(prev => ({
+          ...prev,
+          [messageId]: reactions
+        }));
+      }
+    } catch (error) {
+      console.error('Error removing reaction:', error);
+    }
+  };
+
+  // Get visible message IDs
+  const visibleMessageIds = useMemo(() => 
+    messages.map(msg => msg.id),
+    [messages]
+  );
+
+  // Use the reaction polling hook
+  const {
+    reactions: polledReactions,
+    error: reactionError,
+    isPolling: isReactionPolling
+  } = useReactionPolling({
+    messageIds: visibleMessageIds,
+    enabled: visibleMessageIds.length > 0
+  });
+
+  // Update the messageReactions state when polled reactions change
+  useEffect(() => {
+    if (Object.keys(polledReactions).length > 0) {
+      setMessageReactions(polledReactions);
+    }
+  }, [polledReactions]);
+
   if (status === 'loading') {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
@@ -728,6 +800,15 @@ export default function Chat() {
                     </div>
                     <div className="text-xs mt-1 opacity-70">
                       {new Date(msg.created_at).toLocaleTimeString()}
+                    </div>
+                    <div className="mt-2">
+                      <MessageReactions
+                        messageId={msg.id}
+                        reactions={polledReactions[msg.id] || {}}
+                        onReactionSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
+                        onReactionRemove={(emoji) => handleReactionRemove(msg.id, emoji)}
+                        currentUserId={session.user.id}
+                      />
                     </div>
                   </div>
                 </div>

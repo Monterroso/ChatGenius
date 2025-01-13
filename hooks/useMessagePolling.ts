@@ -9,7 +9,7 @@ export function useMessagePolling(
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   
-  const pollingInterval = 3000; // 3 seconds
+  const pollingInterval = parseInt(process.env.NEXT_PUBLIC_MESSAGE_POLLING_INTERVAL ?? "3000", 10);
 
   // Move fetchMessages outside the effect and memoize it
   const fetchMessages = useCallback(async () => {

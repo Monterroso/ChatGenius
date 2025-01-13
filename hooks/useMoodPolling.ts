@@ -13,7 +13,10 @@ interface UseMoodPollingResult {
  * @param interval Polling interval in milliseconds (default: 3000ms)
  * @returns Object containing moods Map, error state, and polling status
  */
-export function useMoodPolling(userIds: string[], interval = 3000): UseMoodPollingResult {
+export function useMoodPolling(
+  userIds: string[],
+  interval = parseInt(process.env.NEXT_PUBLIC_MOOD_POLLING_INTERVAL ?? "3000", 10)
+): UseMoodPollingResult {
   const [moods, setMoods] = useState<Map<string, UserMood>>(new Map());
   const [error, setError] = useState<Error | null>(null);
   const [isPolling, setIsPolling] = useState(false);

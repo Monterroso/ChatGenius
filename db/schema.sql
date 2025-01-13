@@ -21,7 +21,8 @@ CREATE TABLE messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   sender_id UUID REFERENCES users(id),
   receiver_id UUID REFERENCES users(id),
-  group_id UUID REFERENCES groups(id)
+  group_id UUID REFERENCES groups(id),
+  deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
 );
 
 
@@ -64,6 +65,31 @@ CREATE TABLE user_status (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Function to automatically clean stale devices
+CREATE OR REPLACE FUNCTION clean_stale_devices()
+RETURNS TRIGGER AS $$
+BEGINZ
+  -- Clean devices that haven't been seen in 5 minutes
+  NEW.devices = (
+    SELECT COALESCE(
+      jsonb_agg(device)
+      FILTER (WHERE (device->>'lastSeen')::timestamp with time zone > NOW() - INTERVAL '5 minutes'),
+      '[]'::jsonb
+    )
+    FROM jsonb_array_elements(NEW.devices) AS device
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger to clean stale devices before any update
+CREATE TRIGGER clean_stale_devices_trigger
+  BEFORE UPDATE ON user_status
+  FOR EACH ROW
+  EXECUTE FUNCTION clean_stale_devices();
+
+
+
 -- Add trigger to update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -91,4 +117,38 @@ CREATE TRIGGER update_user_moods_updated_at
     BEFORE UPDATE ON user_moods
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Add the reactions table to store emoji reactions
+CREATE TABLE reactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (message_id, user_id, emoji)
+);
+
+-- First ensure the column exists
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_name = 'messages' 
+        AND column_name = 'deleted_at'
+    ) THEN
+        ALTER TABLE messages 
+        ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+    END IF;
+END $$;
+
+-- Update all existing messages to explicitly set deleted_at to NULL
+UPDATE messages 
+SET deleted_at = NULL 
+WHERE deleted_at IS NULL;
+
+-- Create index if it doesn't exist
+CREATE INDEX IF NOT EXISTS idx_messages_deleted_at 
+ON messages(deleted_at) 
+WHERE deleted_at IS NULL;
 

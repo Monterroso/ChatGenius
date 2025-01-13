@@ -13,7 +13,10 @@ interface UseStatusPollingResult {
  * @param interval Polling interval in milliseconds (default: 3000ms)
  * @returns Object containing statuses Map, error state, and polling status
  */
-export function useStatusPolling(userIds: string[], interval = 3000): UseStatusPollingResult {
+export function useStatusPolling(
+  userIds: string[],
+  interval = parseInt(process.env.NEXT_PUBLIC_STATUS_POLLING_INTERVAL ?? "3000", 10)
+): UseStatusPollingResult {
   const [statuses, setStatuses] = useState<Map<string, EffectiveStatus>>(new Map());
   const [error, setError] = useState<Error | null>(null);
   const [isPolling, setIsPolling] = useState(false);
