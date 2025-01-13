@@ -21,11 +21,9 @@ export const MessageReactions = ({
   currentUserId
 }: MessageReactionsProps) => {
   const [showPicker, setShowPicker] = useState(false);
-  console.log("reactions", reactions);
   return (
     <div className="flex items-center gap-1 mt-1 relative">
       {Object.entries(reactions).map(([emoji, users]) => {
-        console.log(users);
         const hasReacted = users.some(user => user.userId === currentUserId);
         
         return (

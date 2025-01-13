@@ -62,37 +62,24 @@ Handles group invitation system
 - `created_at`: TIMESTAMP WITH TIME ZONE
 - `expires_at`: TIMESTAMP WITH TIME ZONE
 
+### Files
+Stores metadata for uploaded files
+- `id`: UUID (Primary Key, auto-generated)
+- `group_id`: UUID (Foreign Key) - References the group the file is shared with
+- `receiver_id`: UUID (Foreign Key) - References the user the file is sent to in direct messages
+- `uploader_id`: UUID (Foreign Key) - References the user who uploaded the file
+- `filename`: VARCHAR(255) - Name of the file
+- `filepath`: VARCHAR(255) - Path to the file in storage
+- `filetype`: VARCHAR(50) - MIME type of the file
+- `filesize`: BIGINT - Size of the file in bytes
+- `uploaded_at`: TIMESTAMP WITH TIME ZONE - Time the file was uploaded
+- `created_at`: TIMESTAMP WITH TIME ZONE - Record creation timestamp
+- `updated_at`: TIMESTAMP WITH TIME ZONE - Last update timestamp
+
+#### Constraints
+- Either `group_id` or `receiver_id` must be set, but not both.
+
 ## Special Features
 
 ### Automatic Timestamp Management
-- Trigger `update_updated_at_column()` automatically updates `updated_at` timestamps
-- Applied to:
-  - user_status table
-  - user_moods table
-
-### Group Management
-- Only one group can be marked as primary (enforced by unique index `single_primary_group`)
-- Automatic cleanup of expired group invites via `cleanup_expired_invites()` function
-
-### Status System
-The status system supports multiple features:
-- Manual status: Custom user-set messages
-- Auto status: System-determined states
-  - online
-  - away
-  - dnd (do not disturb)
-  - offline
-- Invisible mode: Users can appear offline while still being active
-- Device tracking: Multiple device sessions tracked via JSONB field
-
-### Security Features
-- Passwords are stored as hashes (VARCHAR)
-- Email and username uniqueness enforced
-- Referential integrity maintained through foreign keys
-
-### Timestamps
-All timestamps use TIMESTAMP WITH TIME ZONE type for proper timezone handling
-
-## Common Queries
-
-### User Status Updates
+- Trigger `

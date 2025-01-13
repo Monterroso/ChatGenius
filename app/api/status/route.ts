@@ -3,12 +3,12 @@ import { getServerSession } from 'next-auth';
 import db from '@/lib/db';
 import { calculateEffectiveStatus } from '@/lib/status';
 import { authOptions } from '../auth/[...nextauth]/route';
+import logger from '@/lib/logger';
 
 export async function GET() {
-  console.log('[Status API] GET request received');
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
-    console.log('[Status API] GET - Unauthorized access');
+    logger.api(401, 'GET - Unauthorized access');
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
@@ -18,14 +18,14 @@ export async function GET() {
     `, [session.user.id]);
 
     if (!status) {
-      console.log('[Status API] GET - No status found for user:', session.user.id);
+      logger.api(404, 'GET - No status found for user:', session.user.id);
       return new NextResponse('Status not found', { status: 404 });
     }
 
-    console.log('[Status API] GET - Success for user:', session.user.id);
+    logger.api(200, 'GET - Success for user:', session.user.id);
     return NextResponse.json(calculateEffectiveStatus(status));
   } catch (error) {
-    console.error('[Status API] GET - Error:', error);
+    logger.api(500, 'GET - Error:', error);
     return new NextResponse('Internal Server Error', { status: 500 });
   }
 }

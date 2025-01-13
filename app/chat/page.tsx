@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction } from '@/types/db';
 import { useSocket } from '@/contexts/SocketContext';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
@@ -13,6 +13,14 @@ import { createDirectConversation, createGroupConversation } from '@/lib/chat-he
 import { useTemporaryState } from '@/hooks/useTemporaryState';
 import { MessageReactions } from '@/components/MessageReactions';
 import { useReactionPolling } from '@/hooks/useReactionPolling';
+import { Upload, File, Trash2 } from 'lucide-react';
+import { useFilePolling } from '@/hooks/useFilePolling';
+
+const formatFileSize = (bytes: number) => {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
 
 interface GroupInviteButtonProps {
   inviteId: string;
@@ -236,6 +244,189 @@ type GroupedReactions = Record<string, Array<{
   name: string;
   username: string;
 }>>;
+
+interface FileUploadProps {
+  groupId?: string;
+  receiverId?: string;
+  onUploadComplete: () => void;
+}
+
+interface FileListProps {
+  groupId?: string;
+  receiverId?: string;
+  currentUserId: string;
+  onFileDeleted: () => void;
+  refreshTrigger?: number;
+}
+
+const FileList = ({ groupId, receiverId, currentUserId, onFileDeleted, refreshTrigger }: FileListProps) => {
+  const [files, setFiles] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchFiles = async () => {
+      try {
+        let url = '/api/files';
+        if (groupId) {
+          url = `/api/groups/${groupId}/files`;
+        } else if (receiverId) {
+          url = `/api/messages/${receiverId}/files`;
+        }
+
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setFiles(data);
+        }
+      } catch (error) {
+        console.error('Error fetching files:', error);
+      }
+    };
+
+    fetchFiles();
+  }, [groupId, receiverId, refreshTrigger]);
+
+  const handleDelete = async (fileId: string) => {
+    try {
+      const response = await fetch(`/api/files/${fileId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        setFiles(files.filter(f => f.id !== fileId));
+        onFileDeleted();
+      }
+    } catch (error) {
+      console.error('Error deleting file:', error);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {files.map((file) => (
+        <div key={file.id} className="flex items-center justify-between p-2 bg-gray-100 rounded">
+          <div className="flex items-center gap-2">
+            <File className="w-4 h-4" />
+            <div className="flex flex-col">
+              <a 
+                href={file.downloadUrl}
+                className="text-sm text-blue-600 hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {file.filename}
+              </a>
+              <span className="text-xs text-gray-500">
+                {formatFileSize(file.filesize)} • Uploaded by {file.uploader_username}
+              </span>
+            </div>
+          </div>
+          {currentUserId === file.uploader_id && (
+            <button
+              onClick={() => handleDelete(file.id)}
+              className="p-1 hover:bg-gray-200 rounded"
+              title="Delete file"
+            >
+              <Trash2 className="w-4 h-4 text-red-500" />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const FileUpload = ({ groupId, receiverId, onUploadComplete }: FileUploadProps) => {
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (groupId) {
+      formData.append('groupId', groupId);
+    }
+    if (receiverId) {
+      formData.append('receiverId', receiverId);
+    }
+
+    try {
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const fileData = await response.json();
+        
+        // Create a message for the file
+        const messageResponse = await fetch('/api/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            content: `FILE:${JSON.stringify(fileData)}`,
+            ...(groupId ? { groupId } : { receiverId })
+          }),
+        });
+
+        if (messageResponse.ok) {
+          onUploadComplete();
+        }
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Upload failed');
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Upload failed');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        type="file"
+        onChange={handleFileChange}
+        className="hidden"
+        id="file-upload"
+        accept="image/jpeg,image/png,image/gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        disabled={isUploading}
+      />
+      <label
+        htmlFor="file-upload"
+        className={`inline-flex items-center gap-2 px-4 py-2 rounded-md cursor-pointer ${
+          isUploading 
+            ? 'bg-gray-300 text-gray-700' 
+            : 'bg-primary text-primary-foreground hover:bg-primary/90'
+        } transition-colors`}
+        title="Upload file"
+      >
+        <Upload className="w-4 h-4" />
+        <span className="hidden sm:inline">
+          {isUploading ? 'Uploading...' : 'Upload'}
+        </span>
+      </label>
+      {isUploading && (
+        <div className="absolute bottom-0 left-0 w-full h-1 bg-gray-200 rounded">
+          <div 
+            className="h-full bg-primary rounded transition-all duration-300"
+            style={{ width: `${uploadProgress}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default function Chat() {
   // Auth & routing
@@ -576,6 +767,41 @@ export default function Chat() {
     }
   }, [polledReactions]);
 
+  const [fileListRefresh, setFileListRefresh] = useState(0);
+
+  // Add the file polling hook
+  const {
+    files: polledFiles,
+    error: fileError,
+    isPolling: isFilePolling
+  } = useFilePolling({
+    groupId: selectedConversation?.type === 'group' ? selectedConversation.id : undefined,
+    receiverId: selectedConversation?.type === 'direct' ? selectedConversation.id : undefined,
+    enabled: !!selectedConversation
+  });
+
+  // Update messages when file messages are received
+  useEffect(() => {
+    if (polledFiles.length > 0) {
+      // Update the messages that contain files with the latest file data
+      setMessages(prevMessages => 
+        prevMessages.map(msg => {
+          if (msg.content.startsWith('FILE:')) {
+            const fileData = JSON.parse(msg.content.replace('FILE:', ''));
+            const updatedFile = polledFiles.find(f => f.id === fileData.id);
+            if (updatedFile) {
+              return {
+                ...msg,
+                content: `FILE:${JSON.stringify(updatedFile)}`
+              };
+            }
+          }
+          return msg;
+        })
+      );
+    }
+  }, [polledFiles]);
+
   if (status === 'loading') {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
@@ -746,13 +972,15 @@ export default function Chat() {
             <div className="flex-1 overflow-hidden">
               <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
                 <span>Recent Contacts</span>
-                <button
-                  onClick={() => setShowNewMessagePopup(true)}
-                  className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-                  title="New message"
-                >
-                  +
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowNewMessagePopup(true)}
+                    className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                    title="New message"
+                  >
+                    +
+                  </button>
+                </div>
               </h2>
               <ul className="overflow-y-auto flex-1">
                 {users
@@ -781,7 +1009,56 @@ export default function Chat() {
           <div className="space-y-4">
             {messages.map((msg) => {
               const isCurrentUser = msg.sender_id === session?.user?.id;
+              const isFileMessage = msg.content.startsWith('FILE:');
               
+              if (isFileMessage) {
+                const fileData = JSON.parse(msg.content.replace('FILE:', ''));
+                return (
+                  <div 
+                    key={msg.id}
+                    className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className={`max-w-[70%] rounded-lg p-3 ${
+                      isCurrentUser ? 'bg-primary text-primary-foreground' : 'bg-gray-100'
+                    }`}>
+                      <div className="text-sm font-semibold mb-1">
+                        {msg.sender_id === session?.user?.id 
+                          ? session.user.username 
+                          : users.find(user => user.id === msg.sender_id)?.username || 'Unknown User'}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <File className="w-4 h-4" />
+                        <div className="flex flex-col">
+                          <a 
+                            href="#"
+                            className="text-sm hover:underline"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              window.open(`/api/files/${fileData.id}/download`, '_blank');
+                            }}
+                          >
+                            {fileData.filename}
+                            <span className="text-xs ml-2 opacity-70">
+                              ({formatFileSize(fileData.filesize)})
+                            </span>
+                          </a>
+                          <span className="text-xs opacity-70">
+                            {new Date(fileData.uploaded_at).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      </div>
+                      <MessageReactions
+                        messageId={msg.id}
+                        reactions={polledReactions[msg.id] || {}}
+                        onReactionSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
+                        onReactionRemove={(emoji) => handleReactionRemove(msg.id, emoji)}
+                        currentUserId={session.user.id}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div 
                   key={msg.id}
@@ -820,7 +1097,7 @@ export default function Chat() {
           </div>
         </div>
         <div className="p-4 border-t">
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <input
               type="text"
               placeholder={
@@ -828,7 +1105,7 @@ export default function Chat() {
                   ? `Message ${selectedConversation.name}...`
                   : "Select a conversation to start chatting"
               }
-              className={`w-full px-3 py-2 border rounded-md transition-colors duration-300 ${
+              className={`flex-1 px-3 py-2 border rounded-md transition-colors duration-300 ${
                 messageError 
                   ? 'border-red-500' 
                   : 'border-gray-300'
@@ -843,11 +1120,20 @@ export default function Chat() {
               }}
               disabled={!selectedConversation}
             />
+            {selectedConversation && (
+              <FileUpload 
+                groupId={selectedConversation.type === 'group' ? selectedConversation.id : undefined}
+                receiverId={selectedConversation.type === 'direct' ? selectedConversation.id : undefined}
+                onUploadComplete={() => {
+                  setFileListRefresh(prev => prev + 1);
+                }}
+              />
+            )}
             <button 
               onClick={handleSendMessage}
               className={`px-4 py-2 rounded-md transition-colors ${
                 selectedConversation 
-                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
               disabled={!selectedConversation}

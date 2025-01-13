@@ -35,7 +35,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
   const updateStatus = useCallback(async (status: string) => {
     try {
-      const response = await fetch('/api/users/status', {
+      const response = await fetch('/api/status', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
@@ -131,7 +131,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     const fetchInitialStatuses = async () => {
       try {
-        const response = await fetch('/api/users/status');
+        const response = await fetch('/api/status');
         if (response.ok) {
           const statuses = await response.json();
           console.log('Initial statuses:', statuses);

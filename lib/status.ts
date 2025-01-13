@@ -17,8 +17,6 @@ export function calculateEffectiveStatus(status: UserStatus): EffectiveStatus {
         return currentTime > latestTime ? current : latest;
       })
     : null;
-    
-  console.log("Active devices:", status.devices);
 
   // User is offline if no active devices
   if (activeDevices.length === 0) {

@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from 'next/server';
 import db from '../../../../../lib/db';
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import logger from '@/lib/logger';
 
 export async function GET(
   request: Request,
@@ -11,10 +12,12 @@ export async function GET(
     const session = await getServerSession(authOptions);
 
     if (!session) {
+      logger.api(401, 'Unauthorized messages request');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const groupId = params.id;
+    logger.debug(`Fetching messages for group: ${groupId}`);
 
     const { rows: messages } = await db.query(`
       SELECT m.*, u.name as sender_name, u.username as sender_username
@@ -25,9 +28,10 @@ export async function GET(
       LIMIT 50
     `, [groupId]);
 
+    logger.api(200, `Retrieved ${messages.length} messages for group ${groupId}`);
     return NextResponse.json(messages);
   } catch (error) {
-    console.error('Error fetching messages:', error);
+    logger.api(500, 'Error fetching messages:', error);
     return NextResponse.json({ error: 'Error fetching messages' }, { status: 500 });
   }
 }

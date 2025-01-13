@@ -67,3 +67,7 @@ yarn.lock
 # Cursor
 .cursorrules
 .cursor.json
+
+# Public uploads
+/public/uploads/*
+!/public/uploads/.gitkeep
