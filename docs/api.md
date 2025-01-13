@@ -17,6 +17,25 @@
       password: string;
     }
     ```
+  - Request example:
+    ```typescript
+    POST /api/auth/signin
+    {
+      "email": "user@example.com",
+      "password": "yourpassword"
+    }
+    ```
+  - Response example:
+    ```typescript
+    {
+      "user": {
+        "id": "123",
+        "name": "John Doe",
+        "username": "johndoe",
+        "email": "user@example.com"
+      }
+    }
+    ```
 
 ## Signup
 - `POST /api/signup`
@@ -57,6 +76,23 @@
     }>
     ```
   - Requires authentication
+  - Response example:
+    ```typescript
+    [
+      {
+        "id": "123",
+        "name": "Team Chat",
+        "created_at": "2024-03-20T15:30:00Z",
+        "is_primary": false
+      },
+      {
+        "id": "456",
+        "name": "General",
+        "created_at": "2024-03-20T15:30:00Z",
+        "is_primary": true
+      }
+    ]
+    ```
 
 - `POST /api/groups`
   - Creates new group
@@ -71,6 +107,21 @@
     ```
   - Returns created group details
   - Requires authentication
+  - Request example:
+    ```typescript
+    {
+      "name": "New Project Team"
+    }
+    ```
+  - Response example:
+    ```typescript
+    {
+      "id": "789",
+      "name": "New Project Team",
+      "created_at": "2024-03-20T15:30:00Z",
+      "is_primary": false
+    }
+    ```
 
 - `GET /api/groups/member`
   - Lists all groups the authenticated user is a member of
@@ -123,6 +174,18 @@
     }>
     ```
   - Requires authentication
+  - Response example:
+    ```typescript
+    [
+      {
+        "user_id": "123",
+        "group_id": "456",
+        "joined_at": "2024-03-20T15:30:00Z",
+        "name": "John Doe",
+        "username": "johndoe"
+      }
+    ]
+    ```
 
 - `GET /api/groups/[id]/messages`
   - Retrieves last 50 messages for group
@@ -152,6 +215,24 @@
     ```
   - Returns created message with full details
   - Requires authentication
+  - Request example:
+    ```typescript
+    {
+      "content": "Hello team!"
+    }
+    ```
+  - Response example:
+    ```typescript
+    {
+      "id": "123",
+      "content": "Hello team!",
+      "created_at": "2024-03-20T15:30:00Z",
+      "sender_id": "456",
+      "sender_name": "John Doe",
+      "sender_username": "johndoe",
+      "group_id": "789"
+    }
+    ```
 
 - `POST /api/groups/[id]/invites`
   - Creates new invite for a group
@@ -199,9 +280,8 @@
   - Fetches messages filtered by:
     - groupId - For group messages
     - userId - For direct messages
-  - One of groupId or userId is required (endpoint returns an error if neither is provided).
-  - Returns the last 50 messages.
-  - Sorted by creation date in ascending order (oldest first).
+  - Returns last 50 messages
+  - Includes sender/receiver details
   - Response format:
     ```typescript
     Array<{
@@ -221,7 +301,7 @@
 
 - `POST /api/messages`
   - Creates new message
-  - Required fields: content, and either groupId or receiverId (not both)
+  - Required: content and either groupId or receiverId
   - Request body:
     ```typescript
     {
@@ -371,9 +451,8 @@
 - Transaction support for data consistency
 
 ## Reactions
-
 - `POST /api/reactions`
-  - Adds a reaction to a message.
+  - Adds reaction to message
   - Required fields in request body:
     ```typescript
     {
@@ -381,9 +460,7 @@
       emoji: string;
     }
     ```
-  - Checks if the message exists (and is not deleted).
-  - Inserts a new reaction if not already present for (messageId, userId, emoji).
-  - Returns the updated list of reactions for the message:
+  - Returns updated reactions list:
     ```typescript
     {
       reactions: Array<{
@@ -397,7 +474,30 @@
       }>
     }
     ```
-  - Requires authentication.
+  - Requires authentication
+  - Request example:
+    ```typescript
+    {
+      "messageId": "123",
+      "emoji": "👍"
+    }
+    ```
+  - Response example:
+    ```typescript
+    {
+      "reactions": [
+        {
+          "id": "456",
+          "message_id": "123",
+          "user_id": "789",
+          "emoji": "👍",
+          "created_at": "2024-03-20T15:30:00Z",
+          "name": "John Doe",
+          "username": "johndoe"
+        }
+      ]
+    }
+    ```
 
 - `DELETE /api/reactions`
   - Removes a reaction from a message.
@@ -426,7 +526,8 @@
   - Requires authentication.
 
 - `GET /api/messages/[id]/reactions`
-  - Retrieves all reactions for the specified message, grouped by emoji.
+  - Gets reactions for a message
+  - Groups reactions by emoji
   - Response format:
     ```typescript
     {
@@ -437,4 +538,113 @@
       }>>;
     }
     ```
-  - Requires authentication.
+  - Requires authentication
+
+## Files
+- `GET /api/files/[id]`
+  - Gets file metadata and download URL
+  - Response example:
+    ```typescript
+    {
+      "id": "123",
+      "filename": "document.pdf",
+      "filepath": "/uploads/123-document.pdf",
+      "filetype": "application/pdf",
+      "filesize": 1024567,
+      "uploaded_at": "2024-03-20T15:30:00Z",
+      "downloadUrl": "/uploads/123-document.pdf"
+    }
+    ```
+
+- `DELETE /api/files/[id]`
+  - Response example:
+    ```typescript
+    {
+      "success": true
+    }
+    ```
+
+- `GET /api/files/[id]/download`
+  - Returns file with appropriate headers
+  - Response headers example:
+    ```typescript
+    {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": "attachment; filename=\"document.pdf\"",
+      "Content-Length": "1024567"
+    }
+    ```
+
+- `POST /api/files/upload`
+  - Request example (FormData):
+    ```typescript
+    const formData = new FormData();
+    formData.append('file', fileObject);
+    formData.append('groupId', '123'); // or
+    formData.append('receiverId', '456');
+    ```
+  - Response example:
+    ```typescript
+    {
+      "id": "123",
+      "filename": "image.jpg",
+      "filepath": "/uploads/123-image.jpg",
+      "filetype": "image/jpeg",
+      "filesize": 512000,
+      "uploaded_at": "2024-03-20T15:30:00Z"
+    }
+    ```
+
+## Groups
+- `GET /api/groups/[id]/files`
+  - Response example:
+    ```typescript
+    [
+      {
+        "id": "123",
+        "filename": "document.pdf",
+        "filepath": "/uploads/123-document.pdf",
+        "filetype": "application/pdf",
+        "filesize": 1024567,
+        "uploaded_at": "2024-03-20T15:30:00Z",
+        "uploader_name": "John Doe",
+        "uploader_username": "johndoe"
+      }
+    ]
+    ```
+
+## Mood
+- `GET /api/mood/[userId]`
+  - Response example:
+    ```typescript
+    {
+      "user_id": "123",
+      "mood": "😊",
+      "updated_at": "2024-03-20T15:30:00Z"
+    }
+    ```
+
+- `DELETE /api/mood/[userId]`
+  - Response example:
+    ```typescript
+    {
+      "message": "Mood deleted"
+    }
+    ```
+
+- `POST /api/mood`
+  - Request example:
+    ```typescript
+    {
+      "mood": "🎉"
+    }
+    ```
+  - Response example:
+    ```typescript
+    {
+      "user_id": "123",
+      "mood": "🎉",
+      "updated_at": "2024-03-20T15:30:00Z"
+    }
+    ```
+
