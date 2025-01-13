@@ -67,6 +67,7 @@ yarn.lock
 # Cursor
 .cursorrules
 .cursor.json
+.cursorignore
 
 # Public uploads
 /public/uploads/*
