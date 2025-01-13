@@ -801,7 +801,9 @@ export default function Chat() {
                     <div className="text-xs mt-1 opacity-70">
                       {new Date(msg.created_at).toLocaleTimeString()}
                     </div>
-                    <div className="mt-2">
+                    <div className={`mt-2 text-gray-600 ${
+                      isCurrentUser ? 'bg-primary' : 'bg-gray-100'
+                    }`}>
                       <MessageReactions
                         messageId={msg.id}
                         reactions={polledReactions[msg.id] || {}}

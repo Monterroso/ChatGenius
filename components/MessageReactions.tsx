@@ -35,7 +35,7 @@ export const MessageReactions = ({
             className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm ${
               hasReacted 
                 ? 'bg-primary/10 text-primary' 
-                : 'bg-gray-100 hover:bg-gray-200'
+                : 'hover:bg-gray-200/50'
             }`}
             title={users.map(u => u.username).join(', ')}
           >
@@ -47,7 +47,7 @@ export const MessageReactions = ({
       
       <button
         onClick={() => setShowPicker(!showPicker)}
-        className="p-1 rounded-full hover:bg-gray-100"
+        className="p-1 rounded-full hover:bg-gray-200/50"
         aria-label="Add reaction"
       >
         <span className="text-lg">+</span>

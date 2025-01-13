@@ -20,9 +20,11 @@ interface UseReactionPollingReturn {
   isPolling: boolean;
 }
 
+const DEFAULT_POLLING_INTERVAL = 3000;
+
 export const useReactionPolling = ({
   messageIds,
-  interval = 3000,
+  interval = Number(process.env.NEXT_PUBLIC_REACTION_POLLING_INTERVAL) || DEFAULT_POLLING_INTERVAL,
   enabled = true
 }: UseReactionPollingProps): UseReactionPollingReturn => {
   const [reactions, setReactions] = useState<Record<string, GroupedReactions>>({});
@@ -36,7 +38,6 @@ export const useReactionPolling = ({
     setError(null);
 
     try {
-      // Fetch reactions for all visible messages in parallel
       const responses = await Promise.all(
         messageIds.map(messageId =>
           fetch(`/api/messages/${messageId}/reactions`)
@@ -45,14 +46,12 @@ export const useReactionPolling = ({
         )
       );
 
-      // Update reactions state
       const newReactions = responses.reduce((acc, { messageId, reactions }) => {
         acc[messageId] = reactions;
         return acc;
       }, {} as Record<string, GroupedReactions>);
 
       setReactions(prev => {
-        // Only update if there are actual changes
         const hasChanges = messageIds.some(id => {
           return JSON.stringify(prev[id]) !== JSON.stringify(newReactions[id]);
         });
@@ -69,10 +68,8 @@ export const useReactionPolling = ({
   useEffect(() => {
     if (!enabled || !messageIds.length) return;
 
-    // Initial fetch
     fetchReactions();
 
-    // Set up polling interval
     const intervalId = setInterval(fetchReactions, interval);
 
     return () => {
