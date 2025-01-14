@@ -53,9 +53,9 @@ export type DBGroupMember = {
 // Frontend-specific types that extend the database types
 export type SafeUser = Omit<DBUser, 'password' | 'email'>;
 
-export type Conversation = {
+export interface Conversation {
   id: string;
-  type: 'group' | 'direct';
+  type: 'direct' | 'group' | 'bot';
   name: string;
 }
 

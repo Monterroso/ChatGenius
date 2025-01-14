@@ -24,13 +24,27 @@ export async function GET(request: Request) {
     let query = `
       SELECT 
         m.*,
-        sender.name as sender_name,
-        sender.username as sender_username,
-        receiver.name as receiver_name,
-        receiver.username as receiver_username
+        CASE 
+          WHEN m.sender_type = 'user' THEN sender_user.name
+          WHEN m.sender_type = 'bot' THEN sender_bot.name
+        END as sender_name,
+        CASE 
+          WHEN m.sender_type = 'user' THEN sender_user.username
+          WHEN m.sender_type = 'bot' THEN sender_bot.name
+        END as sender_username,
+        CASE 
+          WHEN m.receiver_type = 'user' THEN receiver_user.name
+          WHEN m.receiver_type = 'bot' THEN receiver_bot.name
+        END as receiver_name,
+        CASE 
+          WHEN m.receiver_type = 'user' THEN receiver_user.username
+          WHEN m.receiver_type = 'bot' THEN receiver_bot.name
+        END as receiver_username
       FROM messages m
-      JOIN users sender ON m.sender_id = sender.id
-      LEFT JOIN users receiver ON m.receiver_id = receiver.id
+      LEFT JOIN users sender_user ON m.sender_id = sender_user.id AND m.sender_type = 'user'
+      LEFT JOIN bot_users sender_bot ON m.sender_id = sender_bot.id AND m.sender_type = 'bot'
+      LEFT JOIN users receiver_user ON m.receiver_id = receiver_user.id AND m.receiver_type = 'user'
+      LEFT JOIN bot_users receiver_bot ON m.receiver_id = receiver_bot.id AND m.receiver_type = 'bot'
       WHERE 1=1
     `;
     
@@ -56,50 +70,60 @@ export async function GET(request: Request) {
     return NextResponse.json(messages);
   } catch (error) {
     console.error('Error fetching messages:', error);
-    return NextResponse.json({ error: 'Error fetching messages' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    console.log('User ID from session:', session?.user?.id);
-    console.log('User ID type:', typeof session?.user?.id);
-
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { content, groupId, receiverId } = await request.json();
-    console.log('Message data:', { content, groupId, receiverId, senderId: session.user.id });
+    const body = await request.json();
+    const { content, groupId, receiverId } = body;
 
     if (!content) {
-      return NextResponse.json({ error: 'Message content is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Content is required' }, { status: 400 });
     }
 
-    // Check that either groupId or receiverId is provided, but not both
-    if ((!groupId && !receiverId) || (groupId && receiverId)) {
-      return NextResponse.json(
-        { error: 'Either groupId or receiverId must be provided, but not both' }, 
-        { status: 400 }
-      );
+    if (!groupId && !receiverId) {
+      return NextResponse.json({ error: 'Either groupId or receiverId is required' }, { status: 400 });
     }
 
-    try {
-      const { rows: [message] } = await db.query(`
-        INSERT INTO messages (content, sender_id, group_id, receiver_id)
-        VALUES ($1, $2, $3, $4)
-        RETURNING *
-      `, [content, session.user.id, groupId || null, receiverId || null]);
-
-      console.log('Inserted message:', message);
-      return NextResponse.json(message);
-    } catch (dbError) {
-      console.error('Database error details:', dbError);
-      throw dbError; // Re-throw to be caught by outer catch
+    // Get receiver type (bot or user)
+    let receiverType = 'user';
+    if (receiverId) {
+      const botCheck = await db.query('SELECT id FROM bot_users WHERE id = $1', [receiverId]);
+      if (botCheck.rows.length > 0) {
+        receiverType = 'bot';
+      }
     }
+
+    const result = await db.query(
+      `INSERT INTO messages (
+        content, 
+        sender_id, 
+        receiver_id, 
+        group_id, 
+        sender_type,
+        receiver_type
+      ) VALUES ($1, $2, $3, $4, $5, $6) 
+      RETURNING *`,
+      [
+        content,
+        session.user.id,
+        receiverId || null,
+        groupId || null,
+        'user',
+        receiverType
+      ]
+    );
+
+    return NextResponse.json(result.rows[0]);
   } catch (error) {
-    console.error('Full error object:', error);
-    return NextResponse.json({ error: 'Error creating message', details: error }, { status: 500 });
+    console.error('Error creating message:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 } 

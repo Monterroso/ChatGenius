@@ -20,7 +20,7 @@ export async function GET(
       `SELECT f.*, u.username as uploader_username
        FROM files f
        JOIN users u ON f.uploader_id = u.id
-       WHERE (f.uploader_id = $1 AND f.receivex r_id = $2)
+       WHERE (f.uploader_id = $1 AND f.receiver_id = $2)
           OR (f.uploader_id = $2 AND f.receiver_id = $1)
        ORDER BY f.uploaded_at DESC`,
       [session.user.id, userId]

@@ -15,6 +15,7 @@ import { MessageReactions } from '@/components/MessageReactions';
 import { useReactionPolling } from '@/hooks/useReactionPolling';
 import { Upload, File, Trash2 } from 'lucide-react';
 import { useFilePolling } from '@/hooks/useFilePolling';
+import { BotCreationDialog } from '@/components/BotCreationDialog';
 
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B';
@@ -441,6 +442,7 @@ export default function Chat() {
   const [groupMembers, setGroupMembers] = useState<DBGroupMember[]>([]);
   const [messages, setMessages] = useState<DBMessage[]>([]);
   const [messageReactions, setMessageReactions] = useState<Record<string, GroupedReactions>>({});
+  const [bots, setBots] = useState<Array<{ id: string; name: string; personality?: string }>>([]);
   
   // UI References & States
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -450,6 +452,7 @@ export default function Chat() {
   const [showNewGroupPopup, setShowNewGroupPopup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [messageError, setMessageError] = useTemporaryState(2000);
+  const [showBotCreationDialog, setShowBotCreationDialog] = useState(false);
   
   // Socket & Real-time Updates
   const { socket, userStatuses } = useSocket();
@@ -458,7 +461,12 @@ export default function Chat() {
   const visibleUserIds = useMemo(() => {
     // Calculate which users are visible in current view
     const ids = new Set<string>();
-    messages.forEach(msg => ids.add(msg.sender_id));
+    messages.forEach(msg => {
+      // Only add non-bot sender IDs
+      if (!bots.some(bot => bot.id === msg.sender_id)) {
+        ids.add(msg.sender_id);
+      }
+    });
     if (selectedConversation?.type === 'group') {
       groupMembers.forEach(member => ids.add(member.user_id));
     }
@@ -466,7 +474,7 @@ export default function Chat() {
       ids.add(selectedConversation.id);
     }
     return Array.from(ids);
-  }, [messages, groupMembers, selectedConversation]);
+  }, [messages, groupMembers, selectedConversation, bots]);
   
   // Polling Hooks for Real-time Data
   const { error: statusError, isPolling: isStatusPolling } = useStatusPolling(visibleUserIds);
@@ -496,6 +504,7 @@ export default function Chat() {
       fetchUsers();
       fetchGroups();
       fetchUsersWithMessages();
+      fetchBots();
     }
   }, [session]);
 
@@ -507,18 +516,23 @@ export default function Chat() {
     }
   };
 
-  const fetchMessages = async (conversationId: string, type: 'group' | 'direct') => {
-    const queryParam = type === 'group' ? 'groupId' : 'userId';
-    const url = `/api/messages?${queryParam}=${conversationId}`;
+  const fetchMessages = async (conversationId: string, type: 'group' | 'direct' | 'bot') => {
+    const url = type === 'group'
+      ? `/api/messages?groupId=${conversationId}`
+      : `/api/messages?userId=${conversationId}`;
     
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: type === 'bot' ? {
+          'x-bot-id': conversationId
+        } : {}
+      });
       if (response.ok) {
         const data = await response.json();
         setMessages(data);
       }
     } catch (error) {
-      console.error('Error fetching initial messages:', error);
+      console.error('Error fetching messages:', error);
     }
   };
 
@@ -546,28 +560,95 @@ export default function Chat() {
     }
   };
 
+  const fetchBots = async () => {
+    try {
+      const response = await fetch('/api/bots');
+      if (response.ok) {
+        const data = await response.json();
+        setBots(data);
+      }
+    } catch (error) {
+      console.error('Error fetching bots:', error);
+    }
+  };
+
+  const [botConversations, setBotConversations] = useState<Record<string, string>>({});
+  
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedConversation) return;
 
     try {
-      const response = await fetch('/api/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          content: message,
-          ...(selectedConversation.type === 'group' 
-            ? { groupId: selectedConversation.id }
-            : { receiverId: selectedConversation.id })
-        }),
-      });
+      let response;
+      
+      if (selectedConversation.type === 'bot') {
+        console.log('Sending bot message:', {
+          botId: selectedConversation.id,
+          currentConversationId: botConversations[selectedConversation.id],
+          message
+        });
 
-      if (response.ok) {
-        setMessage('');
-        fetchMessages(selectedConversation.id, selectedConversation.type);
+        response = await fetch('/api/bots/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-bot-id': selectedConversation.id
+          },
+          body: JSON.stringify({ 
+            message,
+            conversationId: botConversations[selectedConversation.id]
+          }),
+        });
+
+        console.log('Bot message response:', {
+          status: response.status,
+          ok: response.ok
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Bot response data:', data);
+          
+          // Store the conversation ID for this bot
+          if (data.conversationId) {
+            console.log('Updating conversation ID:', {
+              botId: selectedConversation.id,
+              newConversationId: data.conversationId,
+              previousConversationId: botConversations[selectedConversation.id]
+            });
+            
+            setBotConversations(prev => ({
+              ...prev,
+              [selectedConversation.id]: data.conversationId
+            }));
+          }
+          // After sending message, fetch the updated conversation
+          await fetchMessages(selectedConversation.id, 'bot');
+          setMessage('');
+        } else {
+          const errorData = await response.json();
+          console.error('Error response from sending bot message:', errorData);
+          setMessageError();
+        }
       } else {
-        setMessageError();
+        response = await fetch('/api/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            content: message,
+            ...(selectedConversation.type === 'group' 
+              ? { groupId: selectedConversation.id }
+              : { receiverId: selectedConversation.id })
+          }),
+        });
+
+        if (response.ok) {
+          setMessage('');
+          fetchMessages(selectedConversation.id, selectedConversation.type);
+        } else {
+          setMessageError();
+        }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -802,6 +883,15 @@ export default function Chat() {
     }
   }, [polledFiles]);
 
+  const handleBotCreated = (bot: { id: string; name: string; personality?: string }) => {
+    setBots(prevBots => [...prevBots, bot]);
+    handleConversationSelect({
+      id: bot.id,
+      type: 'bot',
+      name: bot.name
+    });
+  };
+
   if (status === 'loading') {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
@@ -907,6 +997,41 @@ export default function Chat() {
         <div className="p-4 flex flex-col h-full">
           <div className="mb-8">
             <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+              <span>Bots</span>
+              <button
+                onClick={() => setShowBotCreationDialog(true)}
+                className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                title="Add new bot"
+              >
+                +
+              </button>
+            </h2>
+            <ul>
+              {bots.map((bot) => (
+                <li 
+                  key={bot.id} 
+                  className={`mb-2 p-2 rounded cursor-pointer flex items-center ${
+                    selectedConversation?.id === bot.id 
+                      ? 'bg-gray-700' 
+                      : 'hover:bg-gray-700'
+                  }`}
+                  onClick={() => handleConversationSelect({
+                    id: bot.id,
+                    type: 'bot',
+                    name: bot.name
+                  })}
+                >
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500" />
+                    <span>🤖 {bot.name}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
               <span>Groups</span>
               <button
                 onClick={() => setShowNewGroupPopup(true)}
@@ -1010,6 +1135,12 @@ export default function Chat() {
             {messages.map((msg) => {
               const isCurrentUser = msg.sender_id === session?.user?.id;
               const isFileMessage = msg.content.startsWith('FILE:');
+              const isBot = bots.some(bot => bot.id === msg.sender_id);
+              const senderName = isCurrentUser 
+                ? session.user.username 
+                : isBot
+                  ? bots.find(bot => bot.id === msg.sender_id)?.name || 'Bot'
+                  : users.find(user => user.id === msg.sender_id)?.username || 'Unknown User';
               
               if (isFileMessage) {
                 const fileData = JSON.parse(msg.content.replace('FILE:', ''));
@@ -1022,9 +1153,7 @@ export default function Chat() {
                       isCurrentUser ? 'bg-primary text-primary-foreground' : 'bg-gray-100'
                     }`}>
                       <div className="text-sm font-semibold mb-1">
-                        {msg.sender_id === session?.user?.id 
-                          ? session.user.username 
-                          : users.find(user => user.id === msg.sender_id)?.username || 'Unknown User'}
+                        {senderName}
                       </div>
                       <div className="flex items-center gap-2">
                         <File className="w-4 h-4" />
@@ -1065,12 +1194,10 @@ export default function Chat() {
                   className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div className={`max-w-[70%] rounded-lg p-3 ${
-                    isCurrentUser ? 'bg-primary text-primary-foreground' : 'bg-gray-100'
+                    isCurrentUser ? 'bg-primary text-primary-foreground' : isBot ? 'bg-blue-100' : 'bg-gray-100'
                   }`}>
                     <div className="text-sm font-semibold mb-1">
-                      {msg.sender_id === session?.user?.id 
-                        ? session.user.username 
-                        : users.find(user => user.id === msg.sender_id)?.username || 'Unknown User'}
+                      {isBot ? `🤖 ${senderName}` : senderName}
                     </div>
                     <div className="break-words">
                       {transformMessageContent(msg.content)}
@@ -1079,7 +1206,7 @@ export default function Chat() {
                       {new Date(msg.created_at).toLocaleTimeString()}
                     </div>
                     <div className={`mt-2 text-gray-600 ${
-                      isCurrentUser ? 'bg-primary' : 'bg-gray-100'
+                      isCurrentUser ? 'bg-primary' : isBot ? 'bg-blue-100' : 'bg-gray-100'
                     }`}>
                       <MessageReactions
                         messageId={msg.id}
@@ -1143,6 +1270,12 @@ export default function Chat() {
           </div>
         </div>
       </div>
+
+      <BotCreationDialog
+        isOpen={showBotCreationDialog}
+        onClose={() => setShowBotCreationDialog(false)}
+        onBotCreated={handleBotCreated}
+      />
     </div>
   );
 }
