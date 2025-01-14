@@ -4,6 +4,7 @@ import { OpenAIEmbeddings } from '@langchain/openai';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { ConversationalRetrievalQAChain } from 'langchain/chains';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
+import db from '@/lib/db';
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error('Missing OpenAI API Key');
@@ -51,6 +52,14 @@ export const createConversationalChain = async (vectorStore: PineconeStore, botI
     k: 5
   });
 
+  // Fetch bot's personality from database
+  const result = await db.query(
+    'SELECT personality FROM bot_users WHERE id = $1',
+    [botId]
+  );
+  
+  const botPersonality = result.rows[0]?.personality || 'You are a helpful AI assistant.';
+
   return ConversationalRetrievalQAChain.fromLLM(
     llm,
     retriever,
@@ -65,9 +74,10 @@ Chat History:
 Follow Up Question: {question}
 
 Standalone question:`,
-      qaTemplate: `You are a helpful AI assistant. Use the following pieces of context and conversation history to answer the question at the end.
+      qaTemplate: `${botPersonality}
+
+Use the following pieces of context and conversation history to answer the question at the end.
 If you don't know the answer, just say that you don't know. Don't try to make up an answer.
-Always maintain a professional and friendly tone.
 
 Relevant Context:
 {context}
