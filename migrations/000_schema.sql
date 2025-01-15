@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255),
@@ -68,7 +70,7 @@ CREATE TABLE user_status (
 -- Function to automatically clean stale devices
 CREATE OR REPLACE FUNCTION clean_stale_devices()
 RETURNS TRIGGER AS $$
-BEGINZ
+BEGIN
   -- Clean devices that haven't been seen in 5 minutes
   NEW.devices = (
     SELECT COALESCE(
