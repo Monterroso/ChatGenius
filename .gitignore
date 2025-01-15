@@ -58,4 +58,12 @@ logs
 
 # Database
 *.sqlite
-*.sqlite3 
+*.sqlite3
+
+# Dependencies
+package-lock.json
+yarn.lock 
+.env*
+.flaskenv*
+!.env.project
+!.env.vault
