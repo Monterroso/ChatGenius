@@ -63,7 +63,18 @@ logs
 # Dependencies
 package-lock.json
 yarn.lock 
+
+# Environment files
 .env*
 .flaskenv*
 !.env.project
 !.env.vault
+
+# Cursor
+.cursorrules
+.cursor.json
+.cursorignore
+
+# Public uploads
+/public/uploads/*
+!/public/uploads/.gitkeep

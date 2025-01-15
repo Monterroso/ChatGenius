@@ -12,7 +12,8 @@ export async function GET() {
     }
 
     const result = await db.query(
-      'SELECT id, name, created_at FROM groups ORDER BY is_primary DESC, created_at DESC'
+      'SELECT id, name, created_at FROM groups ORDER BY is_primary DESC, created_at DESC',
+      []
     );
     return NextResponse.json(result.rows);
   } catch (error) {

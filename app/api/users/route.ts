@@ -1,21 +1,47 @@
-import { getServerSession } from "next-auth";
 import { NextResponse } from 'next/server';
-import db from '../../../lib/db';
-import { authOptions } from "../auth/[...nextauth]/route";
+import { getServerSession } from 'next-auth';
+import db from '@/lib/db';
+import { calculateEffectiveStatus } from '@/lib/status';
+import { authOptions } from '../auth/[...nextauth]/route';
 
-export async function GET(req: Request) {
-  try {
-    const session = await getServerSession(authOptions);
-    console.log(session, "Session")
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const result = await db.query('SELECT id, name, username FROM users WHERE id != $1', [session.user.id]);
-    return NextResponse.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    return NextResponse.json({ error: 'Error fetching users' }, { status: 500 });
+export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    console.error('Unauthorized', session);
+    return new NextResponse('Unauthorized', { status: 401 });
   }
+
+  const { rows: users } = await db.query(`
+    SELECT 
+      u.id,
+      u.name,
+      u.username,
+      s.*
+    FROM users u
+    LEFT JOIN user_status s ON s.user_id = u.id
+    WHERE u.id != $1
+  `, [session.user.id]);
+
+  // Transform users to include effective status
+  const safeUsers = users.map(user => {
+    const status = user.user_id ? calculateEffectiveStatus({
+      user_id: user.user_id,
+      manual_status: user.manual_status,
+      auto_status: user.auto_status || 'offline',
+      invisible: user.invisible || false,
+      last_seen: user.last_seen,
+      devices: user.devices || []
+    }) : null;
+
+    return {
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      status: status?.status || 'offline',
+      lastSeen: status?.lastSeen || user.last_seen || null
+    };
+  });
+
+  return NextResponse.json(safeUsers);
 }
 

@@ -21,6 +21,12 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
+  logging: {
+    fetches: {
+      fullUrl: true,
+    },
+    level: process.env.LOG_LEVEL || 'error'
+  }
 }
 
 mergeConfig(nextConfig, userConfig)
