@@ -99,7 +99,7 @@ export async function POST(req: Request) {
 
     // Create initial status record for the user
     await db.query(
-      'INSERT INTO user_status (user_id, status) VALUES ($1, $2)',
+      'INSERT INTO user_status (user_id, auto_status) VALUES ($1, $2)',
       [userResult.rows[0].id, 'offline']
     );
 
