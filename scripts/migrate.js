@@ -3,11 +3,11 @@ const fs = require('fs').promises;
 const path = require('path');
 require('dotenv').config();
 
-const DATABASE_NAME = process.env.DB_NAME;
-const DATABASE_USER = process.env.DB_USER;
-const DATABASE_PASSWORD = process.env.DB_PASSWORD;
-const DATABASE_HOST = process.env.DB_HOST;
-const DATABASE_PORT = process.env.DB_PORT || 5432;
+const DATABASE_NAME = process.env.POSTGRES_NAME;
+const DATABASE_USER = process.env.POSTGRES_USER;
+const DATABASE_PASSWORD = process.env.POSTGRES_PASSWORD;
+const DATABASE_HOST = process.env.POSTGRES_HOST;
+const DATABASE_PORT = process.env.POSTGRES_PORT || 5432;
 
 // Create a connection pool for the default postgres database
 const mainPool = new Pool({
