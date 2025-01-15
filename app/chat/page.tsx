@@ -4,7 +4,6 @@ import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction } from '@/types/db';
-import { useSocket } from '@/contexts/SocketContext';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
 import { useMoodPolling } from '@/hooks/useMoodPolling';
 import { useStatusPolling } from '@/hooks/useStatusPolling';
@@ -79,28 +78,22 @@ const GroupInviteButton = ({ inviteId, onGroupJoined }: GroupInviteButtonProps) 
   );
 };
 
-const CurrentUserStatus = () => {
+const CurrentUserStatus = ({ statuses }: { statuses: Map<string, EffectiveStatus> }) => {
   const { data: session } = useSession();
-  const { userStatuses } = useSocket();
-  const [status, setStatus] = useState<EffectiveStatus | null>(null);
   const [currentMood, setCurrentMood] = useState('');
   const [displayedMood, setDisplayedMood] = useState('');
+  const status = session?.user?.id ? statuses.get(session.user.id) : null;
+
+  // Debug logging
+  useEffect(() => {
+    if (session?.user?.id) {
+      console.log('Current user ID:', session.user.id);
+      console.log('All statuses:', Array.from(statuses.entries()));
+      console.log('Current user status:', status);
+    }
+  }, [session?.user?.id, statuses, status]);
 
   useEffect(() => {
-    const fetchStatus = async () => {
-      if (!session?.user?.id) return;
-      
-      try {
-        const response = await fetch(`/api/status/${session.user.id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setStatus(data);
-        }
-      } catch (error) {
-        console.error('Error fetching user status:', error);
-      }
-    };
-
     const fetchMood = async () => {
       if (!session?.user?.id) return;
       
@@ -115,26 +108,10 @@ const CurrentUserStatus = () => {
       }
     };
 
-    fetchStatus();
     fetchMood();
   }, [session?.user?.id]);
 
-  // Update status when websocket updates come in
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    const socketStatus = userStatuses.get(session.user.id);
-    if (socketStatus) {
-      setStatus(socketStatus);
-    }
-  }, [userStatuses, session?.user?.id]);
-
-  const colors: Record<string, string> = {
-    online: 'bg-green-500',
-    offline: 'bg-gray-500',
-    away: 'bg-yellow-500',
-    dnd: 'bg-red-500',
-    invisible: 'bg-gray-300'
-  };
+  const colors: Record<string, string> = STATUS_COLORS;
 
   const displayStatus = status?.status || 'offline';
   const colorClass = colors[displayStatus] || colors.offline;
@@ -198,7 +175,6 @@ const CurrentUserStatus = () => {
 const StatusIndicator = ({ status }: { status?: EffectiveStatus }) => {
   const displayStatus = status?.status || 'offline';
   const colorClass = STATUS_COLORS[displayStatus] || STATUS_COLORS.offline;
-
   return (
     <div 
       className={`w-3 h-3 rounded-full ${colorClass} mr-2`}
@@ -454,13 +430,16 @@ export default function Chat() {
   const [messageError, setMessageError] = useTemporaryState(2000);
   const [showBotCreationDialog, setShowBotCreationDialog] = useState(false);
   
-  // Socket & Real-time Updates
-  const { socket, userStatuses } = useSocket();
-
   // Memoized Values
   const visibleUserIds = useMemo(() => {
     // Calculate which users are visible in current view
     const ids = new Set<string>();
+    
+    // Always include current user's ID
+    if (session?.user?.id) {
+      ids.add(session.user.id);
+    }
+    
     messages.forEach(msg => {
       // Only add non-bot sender IDs
       if (!bots.some(bot => bot.id === msg.sender_id)) {
@@ -474,10 +453,15 @@ export default function Chat() {
       ids.add(selectedConversation.id);
     }
     return Array.from(ids);
-  }, [messages, groupMembers, selectedConversation, bots]);
+  }, [messages, groupMembers, selectedConversation, bots, session?.user?.id]);
   
   // Polling Hooks for Real-time Data
-  const { error: statusError, isPolling: isStatusPolling } = useStatusPolling(visibleUserIds);
+  const {
+    statuses,
+    error: statusError,
+    isPolling: isStatusPolling
+  } = useStatusPolling(visibleUserIds);
+
   const {
     messages: polledMessages,
     setMessages: setPolledMessages,
@@ -490,7 +474,6 @@ export default function Chat() {
     setMessages(polledMessages);
   }, [polledMessages]);
 
-  const { statuses } = useStatusPolling(visibleUserIds);
   const { moods } = useMoodPolling(visibleUserIds);
 
   useEffect(() => {
@@ -768,22 +751,6 @@ export default function Chat() {
       alert('Failed to create group');
     }
   };
-
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleStatusChange = (status: EffectiveStatus) => {
-      userStatuses.set(status.userId, status);
-      // Force a re-render since Map mutations don't trigger updates
-      setUsers([...users]);
-    };
-
-    socket.on('statusChanged', handleStatusChange);
-
-    return () => {
-      socket.off('statusChanged', handleStatusChange);
-    };
-  }, [socket, userStatuses, users]);
 
   const handleReactionSelect = async (messageId: string, emoji: string) => {
     try {
@@ -1085,7 +1052,7 @@ export default function Chat() {
                         key={user.id}
                         user={user}
                         moods={moods}
-                        statuses={userStatuses}
+                        statuses={statuses}
                         isSelected={selectedConversation?.id === user.id}
                         onClick={() => handleConversationSelect(createDirectConversation(user))}
                       />
@@ -1115,7 +1082,7 @@ export default function Chat() {
                       key={user.id}
                       user={user}
                       moods={moods}
-                      statuses={userStatuses}
+                      statuses={statuses}
                       isSelected={selectedConversation?.id === user.id}
                       onClick={() => handleConversationSelect(createDirectConversation(user))}
                     />
@@ -1125,7 +1092,7 @@ export default function Chat() {
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-700">
-            <CurrentUserStatus />
+            <CurrentUserStatus statuses={statuses} />
           </div>
         </div>
       </div>

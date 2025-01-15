@@ -4,4 +4,10 @@ export const STATUS_COLORS: Record<string, string> = {
   away: 'bg-yellow-500',
   dnd: 'bg-red-500',
   invisible: 'bg-gray-300'
-}; 
+};
+
+// Status thresholds in milliseconds
+export const STATUS_THRESHOLDS = {
+  AWAY: 1000 * 60 * 2, // 2 minutes
+  OFFLINE: 1000 * 60 * 5 // 5 minutes
+} as const; 

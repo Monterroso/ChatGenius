@@ -1,14 +1,14 @@
 'use client';
 
 import { SessionProvider } from 'next-auth/react';
-import { SocketProvider } from '@/contexts/SocketContext';
+import { ActivityTrackingProvider } from '@/contexts/ActivityTrackingProvider';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
-      <SocketProvider>
+      <ActivityTrackingProvider>
         {children}
-      </SocketProvider>
+      </ActivityTrackingProvider>
     </SessionProvider>
   );
 } 

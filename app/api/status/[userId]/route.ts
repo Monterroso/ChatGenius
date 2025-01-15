@@ -1,32 +1,42 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import db from '@/lib/db';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { calculateEffectiveStatus } from '@/lib/status';
-import { authOptions } from '../../auth/[...nextauth]/route';
 
 export async function GET(
-  req: Request,
+  request: NextRequest,
   { params }: { params: { userId: string } }
 ) {
-  const { userId } = params;
-  const session = await getServerSession(authOptions);
-  
-  if (!session?.user?.id) {
-    return new NextResponse('Unauthorized', { status: 401 });
-  }
-
   try {
-    const { rows: [status] } = await db.query(`
-      SELECT * FROM user_status WHERE user_id = $1
-    `, [userId]);
-
-    if (!status) {
-      return new NextResponse('Status not found', { status: 404 });
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    return NextResponse.json(calculateEffectiveStatus(status));
+    const { userId } = params;
+
+    // Get user's status from database
+    const result = await db.query(
+      `SELECT * FROM user_status WHERE user_id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: 'User status not found' }, { status: 404 });
+    }
+
+    const userStatus = result.rows[0];
+    
+    // Calculate effective status using existing function
+    const effectiveStatus = calculateEffectiveStatus(userStatus);
+
+    return NextResponse.json(effectiveStatus);
   } catch (error) {
-    console.error('[Status API] GET - Error:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    console.error('Error getting user status:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 } 

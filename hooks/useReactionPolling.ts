@@ -72,8 +72,14 @@ export const useReactionPolling = ({
 
     const intervalId = setInterval(fetchReactions, interval);
 
+    const handleUserReturn = () => {
+      fetchReactions();
+    };
+    document.addEventListener('user-returned', handleUserReturn);
+
     return () => {
       clearInterval(intervalId);
+      document.removeEventListener('user-returned', handleUserReturn);
     };
   }, [enabled, messageIds, interval, fetchReactions]);
 

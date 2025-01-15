@@ -59,8 +59,17 @@ export function useMoodPolling(
     // Set up polling interval
     const pollInterval = setInterval(fetchMoods, interval);
 
+    // Add listener for immediate polling when user returns
+    const handleUserReturn = () => {
+      fetchMoods();
+    };
+    document.addEventListener('user-returned', handleUserReturn);
+
     // Cleanup on unmount or when userIds change
-    return () => clearInterval(pollInterval);
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('user-returned', handleUserReturn);
+    };
   }, [userIds, interval]);
 
   return { moods, error, isPolling };
