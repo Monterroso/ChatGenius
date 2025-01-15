@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 const fs = require('fs').promises;
 const path = require('path');
-require('dotenv').config();
+require('dotenv').config({ path: '.env.local' });
 
 const DATABASE_NAME = process.env.POSTGRES_NAME;
 const DATABASE_USER = process.env.POSTGRES_USER;
