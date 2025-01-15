@@ -8,7 +8,7 @@ import { STATUS_THRESHOLDS } from '@/lib/constants';
  * @param maxUpdateInterval Maximum time between updates even during constant activity (default: 60000ms)
  */
 export function useActivityTracking(
-  debounceMs = 10000, 
+  debounceMs = 2000, 
   maxUpdateInterval = 10000
 ) {
   const isEnabled = useRef(false);
@@ -126,10 +126,16 @@ export function useActivityTracking(
       'scroll'
     ];
 
+    const handleUserReturn = () => {
+        console.log("USER RETURNED!!!!!!!!!!");
+        handleActivity()
+    }
+
     // Add event listeners when enabled
     const addListeners = () => {
       events.forEach(event => {
         document.addEventListener(event, handleActivity, { passive: true });
+        document.addEventListener('user-returned', handleUserReturn);
       });
     };
 
@@ -137,6 +143,7 @@ export function useActivityTracking(
     const removeListeners = () => {
       events.forEach(event => {
         document.removeEventListener(event, handleActivity);
+        document.removeEventListener('user-returned', handleUserReturn);
       });
     };
 
