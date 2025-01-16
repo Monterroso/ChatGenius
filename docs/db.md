@@ -14,14 +14,13 @@ Primary user account information storage
 
 ### User Status
 Tracks user presence and status information
-- `user_id`: UUID (Primary Key, references users.id)
-- `manual_status`: TEXT - User-defined status message
-- `auto_status`: TEXT - System status (Enum: 'online', 'away', 'dnd', 'offline')
-- `invisible`: BOOLEAN - Whether user appears offline to others (Default: false)
-- `last_seen`: TIMESTAMP WITH TIME ZONE - Last activity timestamp
-- `devices`: JSONB - Connected devices information (Default: '[]')
-- `created_at`: TIMESTAMP WITH TIME ZONE
-- `updated_at`: TIMESTAMP WITH TIME ZONE
+- `user_id`: UUID (PK) - References users(id)
+- `manual_status`: TEXT - User-set status (Enum: 'online', 'away', 'dnd', 'offline')
+- `invisible`: BOOLEAN - Whether user appears offline to others
+- `last_seen`: TIMESTAMP - Last activity timestamp
+- `devices`: JSONB - Array of connected devices
+- `created_at`: TIMESTAMP - Record creation time
+- `updated_at`: TIMESTAMP - Last update time
 
 ### User Moods
 Stores user mood information

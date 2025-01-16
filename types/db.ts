@@ -71,7 +71,6 @@ export interface UserDevice {
 export interface UserStatus {
   user_id: string;
   manual_status: string | null;
-  auto_status: AutoStatus;
   invisible: boolean;
   last_seen: string;
   devices: UserDevice[];

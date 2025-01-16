@@ -97,8 +97,7 @@ export function useActivityTracking(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            manual_status: null,
-            auto_status: 'online'  // Explicitly set to online when returning
+            manual_status: null
           }),
         }).catch(error => {
           console.error('Failed to update status:', error);

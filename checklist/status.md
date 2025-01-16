@@ -9,15 +9,14 @@ Below is a high-level checklist that builds on your existing database schema, st
 1. **Confirm user_status table.** Ensure you have the following columns (which you already do):  
    - user_id (UUID, Primary Key)  
    - manual_status (TEXT, nullable)  
-   - auto_status (TEXT, CHECK constraint for 'online', 'away', 'dnd', 'offline')  
    - invisible (BOOLEAN, default false)  
    - last_seen (TIMESTAMP WITH TIME ZONE, default CURRENT_TIMESTAMP)  
    - devices (JSONB, default '[]')  
    - created_at, updated_at (TIMESTAMP WITH TIME ZONE)
 
-2. **Decide if you need a new “last_interacted” column or if you can reuse “last_seen.”**
-   - If `(now - user_status.last_seen) > inactivityThreshold`, set auto_status to “away.”  
-   - If no devices are connected for a certain duration, set auto_status to “offline.”
+2. **Use last_seen for status calculation**
+   - If `(now - user_status.last_seen) > inactivityThreshold`, user is considered "away"  
+   - If no devices are connected for a certain duration or `(now - user_status.last_seen) > offlineThreshold`, user is considered "offline"
 
 3. **(Optional) Keep triggers/functions for stale devices.**  
    - For example: removing device entries not active for 5+ minutes.
@@ -64,13 +63,13 @@ Below is a high-level checklist that builds on your existing database schema, st
 ## 4. Logic for Marking “Away” vs. “Offline”
 
 1. **Away**  
-   - If `(now - last_seen) > awayThreshold` but `< offlineThreshold`, set auto_status to “away.”
+   - If `(now - last_seen) > awayThreshold` but `< offlineThreshold`, user is considered "away"
 
 2. **Offline**  
-   - If `(now - last_seen) > offlineThreshold` or if devices is empty, set auto_status to “offline.”
+   - If `(now - last_seen) > offlineThreshold` or if devices is empty, user is considered "offline"
 
 3. **Manual Status**  
-   - Overrides auto_status. For example, if user sets `manual_status` to “dnd,” that takes precedence.
+   - Takes precedence over calculated status when user is recently active
 
 ---
 

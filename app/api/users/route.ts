@@ -27,7 +27,6 @@ export async function GET() {
     const status = user.user_id ? calculateEffectiveStatus({
       user_id: user.user_id,
       manual_status: user.manual_status,
-      auto_status: user.auto_status || 'offline',
       invisible: user.invisible || false,
       last_seen: user.last_seen,
       devices: user.devices || []

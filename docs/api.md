@@ -377,7 +377,6 @@
     ```typescript
     {
       status?: string;
-      autoStatus?: string;
       manualStatus?: string;
       deviceId?: string;
       userAgent?: string;
@@ -392,7 +391,6 @@
     ```typescript
     {
       manual_status?: string;
-      auto_status?: string;
       invisible?: boolean;
     }
     ```
