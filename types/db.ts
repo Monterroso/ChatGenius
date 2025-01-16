@@ -121,3 +121,13 @@ export interface FileData {
   uploaded_at: string;
   download_url?: string;
 }
+
+/** Search result type returned by the search API */
+export type SearchResult = DBMessage & {
+  sender: {
+    id: string;
+    name: string | null;
+    username: string;
+    image?: string;
+  };
+};

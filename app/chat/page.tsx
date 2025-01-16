@@ -3,7 +3,7 @@
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction, FileData } from '@/types/db';
+import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction, FileData, SearchResult } from '@/types/db';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
 import { useMoodPolling } from '@/hooks/useMoodPolling';
 import { useStatusPolling } from '@/hooks/useStatusPolling';
@@ -21,6 +21,9 @@ import { StatusIndicator } from '@/components/StatusIndicator';
 import { CurrentUserStatus } from '@/components/CurrentUserStatus';
 import { FileList } from '@/components/FileList';
 import { UserListItem } from '@/components/UserListItem';
+import SearchBar from '@/components/SearchBar';
+import SearchResultsPopup from '@/components/SearchResultsPopup';
+import ChatMessages from '@/components/ChatMessages';
 
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B';
@@ -63,6 +66,9 @@ export default function Chat() {
   const [newGroupName, setNewGroupName] = useState('');
   const [messageError, setMessageError] = useTemporaryState(2000);
   const [showBotCreationDialog, setShowBotCreationDialog] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
   
   const fetchCurrentUserMood = async () => {
     if (!session?.user?.id) return;
@@ -641,6 +647,78 @@ export default function Chat() {
     }
   };
 
+  const handleSearch = async (query: string, filters: {
+    groupId?: string;
+    fromUserId?: string;
+    toUserId?: string;
+  }) => {
+    setIsSearching(true);
+    setShowSearchResults(true);
+
+    try {
+      // Build search URL with parameters
+      const searchParams = new URLSearchParams();
+      if (query) searchParams.append('query', query);
+      if (filters.groupId) searchParams.append('groupId', filters.groupId);
+      if (filters.fromUserId) searchParams.append('fromUserId', filters.fromUserId);
+      if (filters.toUserId) searchParams.append('toUserId', filters.toUserId);
+
+      const response = await fetch(`/api/search?${searchParams.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSearchResults(data);
+      } else {
+        console.error('Search failed:', await response.json());
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchResultClick = (message: SearchResult) => {
+    // If it's a group message, select that group
+    if (message.group_id) {
+      const group = groups.find(g => g.id === message.group_id);
+      if (group) {
+        handleConversationSelect({
+          id: group.id,
+          type: 'group',
+          name: group.name
+        });
+      }
+    } 
+    // If it's a direct message, select that conversation
+    else if (message.receiver_id) {
+      const otherUserId = message.sender_id === session?.user?.id 
+        ? message.receiver_id 
+        : message.sender_id;
+      
+      const user = users.find(u => u.id === otherUserId);
+      if (user) {
+        handleConversationSelect({
+          id: user.id,
+          type: 'direct',
+          name: user.name || user.username || ''
+        });
+      }
+    }
+    setShowSearchResults(false);
+  };
+
+  // Modify the scroll behavior to only scroll on new messages
+  useEffect(() => {
+    // Only scroll if the last message is from the current user or if it's a new message
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && (
+      lastMessage.sender_id === session?.user?.id || 
+      !messages.some(m => m.id === lastMessage.id)
+    )) {
+      scrollToBottom();
+    }
+  }, [messages, session?.user?.id]);
+
   if (status === 'loading') {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
@@ -657,7 +735,8 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen overflow-hidden">
+      {/* Sidebar */}
       <div className="w-16 bg-gray-900 flex flex-col">
         <div className="flex-grow" />
         <button
@@ -668,361 +747,228 @@ export default function Chat() {
         </button>
       </div>
 
-      {showNewMessagePopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96">
-            <h2 className="text-xl font-bold mb-4">New Message</h2>
-            <input
-              type="text"
-              placeholder="Search users..."
-              className="w-full px-3 py-2 border rounded-md mb-4"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <div className="max-h-60 overflow-y-auto">
-              {users
-                .filter(user => 
-                  user.id !== session?.user?.id &&
-                  (user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                   user.username?.toLowerCase().includes(searchQuery.toLowerCase()))
-                )
-                .slice(0, 10)
-                .map(user => (
-                  <div
-                    key={user.id}
-                    className="p-2 hover:bg-gray-100 cursor-pointer rounded"
-                    onClick={() => handleNewMessage(user.id, user.name || user.username || '')}
-                  >
-                    {user.name} (@{user.username})
-                  </div>
-                ))
-              }
-            </div>
-            <button
-              onClick={() => setShowNewMessagePopup(false)}
-              className="mt-4 px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+      <div className="flex-1 flex flex-col">
+        {/* Fixed position search bar */}
+        <div className="h-16 bg-gray-900 flex items-center px-4">
+          <SearchBar
+            onSearch={handleSearch}
+            groups={groups}
+            users={users}
+            bots={bots}
+            currentUserId={session?.user?.id || ''}
+          />
         </div>
-      )}
 
-      {showNewGroupPopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">Create New Group</h2>
-            <input
-              type="text"
-              placeholder="Group name..."
-              className="w-full px-3 py-2 border rounded-md mb-4 text-gray-900"
-              value={newGroupName}
-              onChange={(e) => setNewGroupName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleCreateGroup();
-                }
-              }}
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowNewGroupPopup(false)}
-                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateGroup}
-                className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors"
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="w-1/4 bg-gray-800 text-white flex flex-col">
-        <div className="p-4 flex flex-col h-full">
-          <div className="mb-8">
-            <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
-              <span>Bots</span>
-              <button
-                onClick={() => setShowBotCreationDialog(true)}
-                className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-                title="Add new bot"
-              >
-                +
-              </button>
-            </h2>
-            <ul>
-              {bots.map((bot) => (
-                <li 
-                  key={bot.id} 
-                  className={`mb-2 p-2 rounded cursor-pointer flex items-center ${
-                    selectedConversation?.id === bot.id 
-                      ? 'bg-gray-700' 
-                      : 'hover:bg-gray-700'
-                  }`}
-                  onClick={() => handleConversationSelect({
-                    id: bot.id,
-                    type: 'bot',
-                    name: bot.name
-                  })}
-                >
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                    <span>🤖 {bot.name}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="mb-8">
-            <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
-              <span>Groups</span>
-              <button
-                onClick={() => setShowNewGroupPopup(true)}
-                className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-                title="Create new group"
-              >
-                +
-              </button>
-            </h2>
-            <ul>
-              {groups.map((group) => (
-                <li 
-                  key={group.id} 
-                  className={`mb-2 p-2 rounded cursor-pointer flex items-center justify-between ${
-                    selectedConversation?.id === group.id 
-                      ? 'bg-gray-700' 
-                      : 'hover:bg-gray-700'
-                  }`}
-                >
-                  <div
-                    onClick={() => handleConversationSelect({
-                      id: group.id,
-                      type: 'group',
-                      name: group.name
-                    })}
-                    className="flex-grow"
-                  >
-                    # {group.name}
-                  </div>
-                  <button
-                    onClick={(e) => handleCreateInvite(group.id, e)}
-                    className="ml-2 px-2 py-1 text-xs bg-primary rounded hover:bg-primary/90 transition-colors"
-                    title="Create invite link"
-                  >
-                    Share
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="flex-1 overflow-hidden flex flex-col">
-            {selectedConversation?.type === 'group' && (
+        {/* Main content with fixed height */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Panel (Groups, Bots, etc.) */}
+          <div className="w-80 bg-gray-800 text-white flex flex-col overflow-y-auto">
+            <div className="p-4 flex flex-col h-full">
               <div className="mb-8">
-                <h2 className="text-xl font-bold mb-4">Group Members</h2>
-                <ul className="overflow-y-auto max-h-40">
-                  {users
-                    .filter(user => groupMembers.some(member => member.user_id === user.id))
-                    .map((user) => (
-                      <UserListItem
-                        key={user.id}
-                        user={user}
-                        moods={moods}
-                        statuses={statuses}
-                        isSelected={selectedConversation?.id === user.id}
-                        onClick={() => handleConversationSelect(createDirectConversation(user))}
-                      />
-                    ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="flex-1 overflow-hidden">
-              <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
-                <span>Recent Contacts</span>
-                <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                  <span>Bots</span>
                   <button
-                    onClick={() => setShowNewMessagePopup(true)}
+                    onClick={() => setShowBotCreationDialog(true)}
                     className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
-                    title="New message"
+                    title="Add new bot"
                   >
                     +
                   </button>
-                </div>
-              </h2>
-              <ul className="overflow-y-auto flex-1">
-                {users
-                  .filter(user => usersWithMessages.has(user.id))
-                  .map((user) => (
-                    <UserListItem
-                      key={user.id}
-                      user={user}
-                      moods={moods}
-                      statuses={statuses}
-                      isSelected={selectedConversation?.id === user.id}
-                      onClick={() => handleConversationSelect(createDirectConversation(user))}
-                    />
+                </h2>
+                <ul>
+                  {bots.map((bot) => (
+                    <li 
+                      key={bot.id} 
+                      className={`mb-2 p-2 rounded cursor-pointer flex items-center ${
+                        selectedConversation?.id === bot.id 
+                          ? 'bg-gray-700' 
+                          : 'hover:bg-gray-700'
+                      }`}
+                      onClick={() => handleConversationSelect({
+                        id: bot.id,
+                        type: 'bot',
+                        name: bot.name
+                      })}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500" />
+                        <span>🤖 {bot.name}</span>
+                      </div>
+                    </li>
                   ))}
-              </ul>
+                </ul>
+              </div>
+
+              <div className="mb-8">
+                <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                  <span>Groups</span>
+                  <button
+                    onClick={() => setShowNewGroupPopup(true)}
+                    className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                    title="Create new group"
+                  >
+                    +
+                  </button>
+                </h2>
+                <ul>
+                  {groups.map((group) => (
+                    <li 
+                      key={group.id} 
+                      className={`mb-2 p-2 rounded cursor-pointer flex items-center justify-between ${
+                        selectedConversation?.id === group.id 
+                          ? 'bg-gray-700' 
+                          : 'hover:bg-gray-700'
+                      }`}
+                    >
+                      <div
+                        onClick={() => handleConversationSelect({
+                          id: group.id,
+                          type: 'group',
+                          name: group.name
+                        })}
+                        className="flex-grow"
+                      >
+                        # {group.name}
+                      </div>
+                      <button
+                        onClick={(e) => handleCreateInvite(group.id, e)}
+                        className="ml-2 px-2 py-1 text-xs bg-primary rounded hover:bg-primary/90 transition-colors"
+                        title="Create invite link"
+                      >
+                        Share
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="flex-1 overflow-hidden flex flex-col">
+                {selectedConversation?.type === 'group' && (
+                  <div className="mb-8">
+                    <h2 className="text-xl font-bold mb-4">Group Members</h2>
+                    <ul className="overflow-y-auto max-h-40">
+                      {users
+                        .filter(user => groupMembers.some(member => member.user_id === user.id))
+                        .map((user) => (
+                          <UserListItem
+                            key={user.id}
+                            user={user}
+                            moods={moods}
+                            statuses={statuses}
+                            isSelected={selectedConversation?.id === user.id}
+                            onClick={() => handleConversationSelect(createDirectConversation(user))}
+                          />
+                        ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="flex-1 overflow-hidden">
+                  <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                    <span>Recent Contacts</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowNewMessagePopup(true)}
+                        className="px-2 py-1 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                        title="New message"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </h2>
+                  <ul className="overflow-y-auto flex-1">
+                    {users
+                      .filter(user => usersWithMessages.has(user.id))
+                      .map((user) => (
+                        <UserListItem
+                          key={user.id}
+                          user={user}
+                          moods={moods}
+                          statuses={statuses}
+                          isSelected={selectedConversation?.id === user.id}
+                          onClick={() => handleConversationSelect(createDirectConversation(user))}
+                        />
+                      ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <CurrentUserStatus 
+                  statuses={statuses} 
+                  currentMood={currentUserMood}
+                  onUpdateMood={handleUpdateMood}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-gray-700">
-            <CurrentUserStatus 
-              statuses={statuses} 
-              currentMood={currentUserMood}
-              onUpdateMood={handleUpdateMood}
-            />
-          </div>
-        </div>
-      </div>
-      <div className="w-3/4 flex flex-col">
-        <div className="flex-grow p-4 overflow-y-auto">
-          <div className="space-y-4">
-            <FileList
-              files={files}
-              currentUserId={session.user.id}
-              onFileDeleted={handleFileDeleted}
-            />
-            {messages.map((msg) => {
-              const isCurrentUser = msg.sender_id === session?.user?.id;
-              const isFileMessage = msg.content.startsWith('FILE:');
-              const isBot = bots.some(bot => bot.id === msg.sender_id);
-              const senderName = isCurrentUser 
-                ? session.user.username 
-                : isBot
-                  ? bots.find(bot => bot.id === msg.sender_id)?.name || 'Bot'
-                  : users.find(user => user.id === msg.sender_id)?.username || 'Unknown User';
-              
-              if (isFileMessage) {
-                const fileData = JSON.parse(msg.content.replace('FILE:', ''));
-                return (
-                  <div 
-                    key={msg.id}
-                    className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`max-w-[70%] rounded-lg p-3 ${
-                      isCurrentUser ? 'bg-primary text-primary-foreground' : 'bg-gray-100'
-                    }`}>
-                      <div className="text-sm font-semibold mb-1">
-                        {senderName}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <File className="w-4 h-4" />
-                        <div className="flex flex-col">
-                          <a 
-                            href="#"
-                            className="text-sm hover:underline"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              window.open(`/api/files/${fileData.id}/download`, '_blank');
-                            }}
-                          >
-                            {fileData.filename}
-                            <span className="text-xs ml-2 opacity-70">
-                              ({formatFileSize(fileData.filesize)})
-                            </span>
-                          </a>
-                          <span className="text-xs opacity-70">
-                            {new Date(fileData.uploaded_at).toLocaleTimeString()}
-                          </span>
-                        </div>
-                      </div>
-                      <MessageReactions
-                        messageId={msg.id}
-                        reactions={polledReactions[msg.id] || {}}
-                        onReactionSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
-                        onReactionRemove={(emoji) => handleReactionRemove(msg.id, emoji)}
-                        currentUserId={session.user.id}
-                      />
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div 
-                  key={msg.id}
-                  className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div className={`max-w-[70%] rounded-lg p-3 ${
-                    isCurrentUser ? 'bg-primary text-primary-foreground' : isBot ? 'bg-blue-100' : 'bg-gray-100'
-                  }`}>
-                    <div className="text-sm font-semibold mb-1">
-                      {isBot ? `🤖 ${senderName}` : senderName}
-                    </div>
-                    <div className="break-words">
-                      {transformMessageContent(msg.content)}
-                    </div>
-                    <div className="text-xs mt-1 opacity-70">
-                      {new Date(msg.created_at).toLocaleTimeString()}
-                    </div>
-                    <div className={`mt-2 text-gray-600 ${
-                      isCurrentUser ? 'bg-primary' : isBot ? 'bg-blue-100' : 'bg-gray-100'
-                    }`}>
-                      <MessageReactions
-                        messageId={msg.id}
-                        reactions={polledReactions[msg.id] || {}}
-                        onReactionSelect={(emoji) => handleReactionSelect(msg.id, emoji)}
-                        onReactionRemove={(emoji) => handleReactionRemove(msg.id, emoji)}
-                        currentUserId={session.user.id}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-        <div className="p-4 border-t">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder={
-                selectedConversation 
-                  ? `Message ${selectedConversation.name}...`
-                  : "Select a conversation to start chatting"
-              }
-              className={`flex-1 px-3 py-2 border rounded-md transition-colors duration-300 ${
-                messageError 
-                  ? 'border-red-500' 
-                  : 'border-gray-300'
-              }`}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
+          {/* Chat Area with fixed layout */}
+          <div className="flex-1 flex flex-col bg-white">
+            {/* Messages area with independent scroll */}
+            <div className="flex-1 min-h-0">
+              <ChatMessages
+                messages={messages}
+                currentUserId={session.user.id}
+                currentUsername={session.user.username}
+                users={users}
+                bots={bots}
+                reactions={polledReactions}
+                onReactionSelect={handleReactionSelect}
+                onReactionRemove={handleReactionRemove}
+                transformMessageContent={transformMessageContent}
+                shouldScrollToBottom={
+                  messages.length > 0 && 
+                  messages[messages.length - 1].sender_id === session.user.id
                 }
-              }}
-              disabled={!selectedConversation}
-            />
-            {selectedConversation && (
-              <FileUpload 
-                isUploading={isUploading}
-                uploadProgress={uploadProgress}
-                onFileSelect={handleFileSelect}
               />
-            )}
-            <button 
-              onClick={handleSendMessage}
-              className={`px-4 py-2 rounded-md transition-colors ${
-                selectedConversation 
-                  ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              }`}
-              disabled={!selectedConversation}
-            >
-              Send
-            </button>
+            </div>
+
+            {/* Fixed input area */}
+            <div className="flex-shrink-0 p-4 border-t">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder={
+                    selectedConversation 
+                      ? `Message ${selectedConversation.name}...`
+                      : "Select a conversation to start chatting"
+                  }
+                  className={`flex-1 px-3 py-2 border rounded-md transition-colors duration-300 ${
+                    messageError 
+                      ? 'border-red-500' 
+                      : 'border-gray-300'
+                  }`}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  disabled={!selectedConversation}
+                />
+                {selectedConversation && (
+                  <FileUpload 
+                    isUploading={isUploading}
+                    uploadProgress={uploadProgress}
+                    onFileSelect={handleFileSelect}
+                  />
+                )}
+                <button 
+                  onClick={handleSendMessage}
+                  className={`px-4 py-2 rounded-md transition-colors ${
+                    selectedConversation 
+                      ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                  disabled={!selectedConversation}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1032,6 +978,15 @@ export default function Chat() {
         onClose={() => setShowBotCreationDialog(false)}
         onBotCreated={handleBotCreated}
       />
+
+      {showSearchResults && (
+        <SearchResultsPopup
+          results={searchResults}
+          isLoading={isSearching}
+          onClose={() => setShowSearchResults(false)}
+          onMessageClick={handleSearchResultClick}
+        />
+      )}
     </div>
   );
 }
