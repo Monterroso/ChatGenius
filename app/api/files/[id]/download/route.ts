@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import db from '@/lib/db';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
 import logger from '@/lib/logger';
 
 export async function GET(
@@ -20,7 +18,7 @@ export async function GET(
     const fileId = params.id;
     logger.debug(`Attempting to download file: ${fileId}`);
 
-    // Get file metadata and check access permissions
+    // Get file metadata, data, and check access permissions
     const result = await db.query(
       `SELECT f.*, g.id as group_id 
        FROM files f
@@ -45,11 +43,17 @@ export async function GET(
 
     const file = result.rows[0];
     
-    // Read the file
-    const fileBuffer = await readFile(file.filepath);
+    // Check if file data exists
+    if (!file.file_data) {
+      logger.api(404, `File data not found: ${fileId}`);
+      return NextResponse.json(
+        { error: 'File data not found' },
+        { status: 404 }
+      );
+    }
 
     // Create response with proper headers for download
-    const response = new NextResponse(fileBuffer);
+    const response = new NextResponse(file.file_data);
     response.headers.set('Content-Type', file.filetype);
     response.headers.set('Content-Disposition', `attachment; filename="${file.filename}"`);
     response.headers.set('Content-Length', file.filesize.toString());

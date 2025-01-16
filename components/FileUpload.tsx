@@ -1,6 +1,11 @@
 import { Upload } from 'lucide-react';
 import { useState } from 'react';
 
+// Default to 5MB if not set in environment
+const MAX_FILE_SIZE = process.env.NEXT_PUBLIC_MAX_FILE_SIZE_BYTES 
+  ? parseInt(process.env.NEXT_PUBLIC_MAX_FILE_SIZE_BYTES) 
+  : 5 * 1024 * 1024;
+
 interface FileUploadProps {
   /**
    * Whether a file is currently being uploaded
@@ -14,6 +19,10 @@ interface FileUploadProps {
    * Callback function that is called when a file is selected for upload
    */
   onFileSelect: (file: File) => void;
+  /**
+   * Callback function that is called when there's an error with file selection
+   */
+  onError?: (message: string) => void;
 }
 
 /**
@@ -21,7 +30,7 @@ interface FileUploadProps {
  * 
  * This component handles the file selection UI and delegates the actual upload
  * process to the parent component. It shows upload progress and handles the disabled
- * state during uploads.
+ * state during uploads. It also validates file size before triggering the upload.
  * 
  * @component
  * @example
@@ -30,17 +39,24 @@ interface FileUploadProps {
  *   isUploading={isUploading}
  *   uploadProgress={progress}
  *   onFileSelect={handleFileSelect}
+ *   onError={handleError}
  * />
  * ```
  */
 export const FileUpload = ({ 
   isUploading,
   uploadProgress,
-  onFileSelect 
+  onFileSelect,
+  onError
 }: FileUploadProps) => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        onError?.(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`);
+        e.target.value = ''; // Reset input
+        return;
+      }
       onFileSelect(file);
     }
   };

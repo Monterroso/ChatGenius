@@ -2,13 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import db from '@/lib/db';
-import { writeFile } from 'fs/promises';
-import { join } from 'path';
-import crypto from 'crypto';
 import logger from '@/lib/logger';
 
-const UPLOAD_DIR = 'public/uploads';
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = process.env.MAX_FILE_SIZE_BYTES ? parseInt(process.env.MAX_FILE_SIZE_BYTES) : 5242880; // 5MB default
 const ALLOWED_TYPES = [
   'image/jpeg',
   'image/png',
@@ -56,16 +52,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    // Create unique filename with timestamp and random string
-    const timestamp = Date.now();
-    const randomString = crypto.randomBytes(8).toString('hex');
-    const filename = `${timestamp}-${randomString}-${file.name}`;
-    const filepath = join(UPLOAD_DIR, filename);
+    // Get file data as buffer
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
 
-    // Ensure upload directory exists
-    await writeFile(filepath, Buffer.from(await file.arrayBuffer()));
-
-    // Save file metadata to database
+    // Save file data and metadata to database
     const result = await db.query(
       `INSERT INTO files (
         group_id,
@@ -74,10 +64,20 @@ export async function POST(req: NextRequest) {
         filename,
         filepath,
         filetype,
-        filesize
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, filename, filepath, filetype, filesize, uploaded_at`,
-      [groupId || null, receiverId || null, session.user.id, file.name, filepath, file.type, file.size]
+        filesize,
+        file_data
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, filename, filetype, filesize, uploaded_at`,
+      [
+        groupId || null,
+        receiverId || null,
+        session.user.id,
+        file.name,
+        'deprecated', // Keep filepath for backward compatibility
+        file.type,
+        file.size,
+        fileBuffer
+      ]
     );
 
     logger.api(201, `File uploaded successfully: ${file.name}`);
