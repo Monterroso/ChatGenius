@@ -111,3 +111,13 @@ export interface GroupedReactions {
     username: string;
   }>;
 }
+
+export interface FileData {
+  id: string;
+  filename: string;
+  filesize: number;
+  uploader_id: string;
+  uploader_username: string;
+  uploaded_at: string;
+  download_url?: string;
+}

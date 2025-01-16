@@ -3,7 +3,7 @@
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction } from '@/types/db';
+import type { SafeUser, DBMessage, DBGroup, DBGroupMember, Conversation, AutoStatus, EffectiveStatus, UserMood, MessageReaction, FileData } from '@/types/db';
 import { useMessagePolling } from '@/hooks/useMessagePolling';
 import { useMoodPolling } from '@/hooks/useMoodPolling';
 import { useStatusPolling } from '@/hooks/useStatusPolling';
@@ -15,6 +15,12 @@ import { useReactionPolling } from '@/hooks/useReactionPolling';
 import { Upload, File, Trash2 } from 'lucide-react';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { BotCreationDialog } from '@/components/BotCreationDialog';
+import { GroupInviteButton } from '@/components/GroupInviteButton';
+import { FileUpload } from '@/components/FileUpload';
+import { StatusIndicator } from '@/components/StatusIndicator';
+import { CurrentUserStatus } from '@/components/CurrentUserStatus';
+import { FileList } from '@/components/FileList';
+import { UserListItem } from '@/components/UserListItem';
 
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B';
@@ -22,388 +28,11 @@ const formatFileSize = (bytes: number) => {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
 
-interface GroupInviteButtonProps {
-  inviteId: string;
-  onGroupJoined?: () => void;
-}
-
-const GroupInviteButton = ({ inviteId, onGroupJoined }: GroupInviteButtonProps) => {
-  const [groupName, setGroupName] = useState('Loading...');
-  
-  useEffect(() => {
-    const fetchGroupName = async () => {
-      try {
-        const groupInfoResponse = await fetch(`/api/invites/${inviteId}`);
-        if (groupInfoResponse.ok) {
-          const data = await groupInfoResponse.json();
-          setGroupName(data.groupName || 'Unknown Group');
-        }
-      } catch (error) {
-        console.error('Error fetching group name:', error);
-        setGroupName('Unknown Group');
-      }
-    };
-    fetchGroupName();
-  }, [inviteId]);
-
-  const handleJoinGroup = async () => {
-    try {
-      const response = await fetch(`/api/invites/${inviteId}/accept`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        onGroupJoined?.();
-        alert(`Successfully joined ${groupName}!`);
-      } else {
-        const data = await response.json();
-        alert(data.error || 'Failed to join group');
-      }
-    } catch (error) {
-      console.error('Error joining group:', error);
-      alert('Failed to join group');
-    }
-  };
-
-  return (
-    <button
-      onClick={handleJoinGroup}
-      className="inline-flex items-center px-3 py-1 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
-    >
-      Join {groupName}
-    </button>
-  );
-};
-
-const CurrentUserStatus = ({ statuses }: { statuses: Map<string, EffectiveStatus> }) => {
-  const { data: session } = useSession();
-  const [currentMood, setCurrentMood] = useState('');
-  const [displayedMood, setDisplayedMood] = useState('');
-  const status = session?.user?.id ? statuses.get(session.user.id) : null;
-
-  // Debug logging
-  useEffect(() => {
-    if (session?.user?.id) {
-      console.log('Current user ID:', session.user.id);
-      console.log('All statuses:', Array.from(statuses.entries()));
-      console.log('Current user status:', status);
-    }
-  }, [session?.user?.id, statuses, status]);
-
-  useEffect(() => {
-    const fetchMood = async () => {
-      if (!session?.user?.id) return;
-      
-      try {
-        const response = await fetch(`/api/mood/${session.user.id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setDisplayedMood(data.mood || '');
-        }
-      } catch (error) {
-        console.error('Error fetching mood:', error);
-      }
-    };
-
-    fetchMood();
-  }, [session?.user?.id]);
-
-  const colors: Record<string, string> = STATUS_COLORS;
-
-  const displayStatus = status?.status || 'offline';
-  const colorClass = colors[displayStatus] || colors.offline;
-
-  const updateMood = async () => {
-    try {
-      await fetch('/api/mood', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mood: currentMood })
-      });
-      setDisplayedMood(currentMood);
-      setCurrentMood('');
-    } catch (error) {
-      console.error('Error updating mood:', error);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="w-full p-2 rounded-md hover:bg-gray-800 transition-colors">
-        <div className="flex items-center gap-2">
-          <div className={`w-3 h-3 rounded-full ${colorClass}`} />
-          <div className="flex flex-col">
-            <span className="text-sm text-white">
-              {session?.user?.username || 'User'}
-            </span>
-            {displayedMood && (
-              <span className="text-xs text-gray-400">
-                {displayedMood}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-      
-      <div className="flex gap-2 items-center">
-        <input
-          type="text"
-          value={currentMood}
-          onChange={(e) => setCurrentMood(e.target.value)}
-          placeholder="Set mood..."
-          className="w-full px-2 py-1 text-sm bg-gray-700 rounded"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              updateMood();
-            }
-          }}
-        />
-        <button
-          onClick={updateMood}
-          className="px-2 py-1 text-xs bg-primary rounded hover:bg-primary/90"
-        >
-          Set
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const StatusIndicator = ({ status }: { status?: EffectiveStatus }) => {
-  const displayStatus = status?.status || 'offline';
-  const colorClass = STATUS_COLORS[displayStatus] || STATUS_COLORS.offline;
-  return (
-    <div 
-      className={`w-3 h-3 rounded-full ${colorClass} mr-2`}
-      title={displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
-    />
-  );
-};
-
-const UserListItem = ({ 
-  user, 
-  isSelected, 
-  onClick,
-  moods,
-  statuses 
-}: { 
-  user: SafeUser; 
-  isSelected: boolean; 
-  onClick: () => void;
-  moods: Map<string, UserMood>;
-  statuses: Map<string, EffectiveStatus>;
-}) => (
-  <li 
-    className={`mb-2 p-2 rounded cursor-pointer ${
-      isSelected ? 'bg-gray-700' : 'hover:bg-gray-700'
-    }`}
-    onClick={onClick}
-  >
-    <div className="flex items-center">
-      <StatusIndicator status={statuses.get(user.id)} />
-      <div className="flex flex-col">
-        <span>{user.name} (@{user.username})</span>
-        {moods.get(user.id) && (
-          <span className="text-xs text-gray-400">
-            {moods.get(user.id)?.mood}
-          </span>
-        )}
-      </div>
-    </div>
-  </li>
-);
-
 type GroupedReactions = Record<string, Array<{
   userId: string;
   name: string;
   username: string;
 }>>;
-
-interface FileUploadProps {
-  groupId?: string;
-  receiverId?: string;
-  onUploadComplete: () => void;
-}
-
-interface FileListProps {
-  groupId?: string;
-  receiverId?: string;
-  currentUserId: string;
-  onFileDeleted: () => void;
-  refreshTrigger?: number;
-}
-
-const FileList = ({ groupId, receiverId, currentUserId, onFileDeleted, refreshTrigger }: FileListProps) => {
-  const [files, setFiles] = useState<any[]>([]);
-
-  useEffect(() => {
-    const fetchFiles = async () => {
-      try {
-        let url = '/api/files';
-        if (groupId) {
-          url = `/api/groups/${groupId}/files`;
-        } else if (receiverId) {
-          url = `/api/messages/${receiverId}/files`;
-        }
-
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          setFiles(data);
-        }
-      } catch (error) {
-        console.error('Error fetching files:', error);
-      }
-    };
-
-    fetchFiles();
-  }, [groupId, receiverId, refreshTrigger]);
-
-  const handleDelete = async (fileId: string) => {
-    try {
-      const response = await fetch(`/api/files/${fileId}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        setFiles(files.filter(f => f.id !== fileId));
-        onFileDeleted();
-      }
-    } catch (error) {
-      console.error('Error deleting file:', error);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      {files.map((file) => (
-        <div key={file.id} className="flex items-center justify-between p-2 bg-gray-100 rounded">
-          <div className="flex items-center gap-2">
-            <File className="w-4 h-4" />
-            <div className="flex flex-col">
-              <a 
-                href={file.downloadUrl}
-                className="text-sm text-blue-600 hover:underline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {file.filename}
-              </a>
-              <span className="text-xs text-gray-500">
-                {formatFileSize(file.filesize)} • Uploaded by {file.uploader_username}
-              </span>
-            </div>
-          </div>
-          {currentUserId === file.uploader_id && (
-            <button
-              onClick={() => handleDelete(file.id)}
-              className="p-1 hover:bg-gray-200 rounded"
-              title="Delete file"
-            >
-              <Trash2 className="w-4 h-4 text-red-500" />
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const FileUpload = ({ groupId, receiverId, onUploadComplete }: FileUploadProps) => {
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadProgress(0);
-
-    const formData = new FormData();
-    formData.append('file', file);
-    if (groupId) {
-      formData.append('groupId', groupId);
-    }
-    if (receiverId) {
-      formData.append('receiverId', receiverId);
-    }
-
-    try {
-      const response = await fetch('/api/files/upload', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (response.ok) {
-        const fileData = await response.json();
-        
-        // Create a message for the file
-        const messageResponse = await fetch('/api/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            content: `FILE:${JSON.stringify(fileData)}`,
-            ...(groupId ? { groupId } : { receiverId })
-          }),
-        });
-
-        if (messageResponse.ok) {
-          onUploadComplete();
-        }
-      } else {
-        const error = await response.json();
-        alert(error.error || 'Upload failed');
-      }
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      alert('Upload failed');
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <input
-        type="file"
-        onChange={handleFileChange}
-        className="hidden"
-        id="file-upload"
-        accept="image/jpeg,image/png,image/gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        disabled={isUploading}
-      />
-      <label
-        htmlFor="file-upload"
-        className={`inline-flex items-center gap-2 px-4 py-2 rounded-md cursor-pointer ${
-          isUploading 
-            ? 'bg-gray-300 text-gray-700' 
-            : 'bg-primary text-primary-foreground hover:bg-primary/90'
-        } transition-colors`}
-        title="Upload file"
-      >
-        <Upload className="w-4 h-4" />
-        <span className="hidden sm:inline">
-          {isUploading ? 'Uploading...' : 'Upload'}
-        </span>
-      </label>
-      {isUploading && (
-        <div className="absolute bottom-0 left-0 w-full h-1 bg-gray-200 rounded">
-          <div 
-            className="h-full bg-primary rounded transition-all duration-300"
-            style={{ width: `${uploadProgress}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
-};
 
 export default function Chat() {
   // Auth & routing
@@ -419,6 +48,11 @@ export default function Chat() {
   const [messages, setMessages] = useState<DBMessage[]>([]);
   const [messageReactions, setMessageReactions] = useState<Record<string, GroupedReactions>>({});
   const [bots, setBots] = useState<Array<{ id: string; name: string; personality?: string }>>([]);
+  const [currentUserMood, setCurrentUserMood] = useState('');
+  const [files, setFiles] = useState<FileData[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [groupInvites, setGroupInvites] = useState<Record<string, { name: string; isLoading: boolean }>>({});
   
   // UI References & States
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -429,6 +63,33 @@ export default function Chat() {
   const [newGroupName, setNewGroupName] = useState('');
   const [messageError, setMessageError] = useTemporaryState(2000);
   const [showBotCreationDialog, setShowBotCreationDialog] = useState(false);
+  
+  const fetchCurrentUserMood = async () => {
+    if (!session?.user?.id) return;
+    
+    try {
+      const response = await fetch(`/api/mood/${session.user.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentUserMood(data.mood || '');
+      }
+    } catch (error) {
+      console.error('Error fetching mood:', error);
+    }
+  };
+
+  const handleUpdateMood = async (newMood: string) => {
+    try {
+      await fetch('/api/mood', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mood: newMood })
+      });
+      setCurrentUserMood(newMood);
+    } catch (error) {
+      console.error('Error updating mood:', error);
+    }
+  };
   
   // Memoized Values
   const visibleUserIds = useMemo(() => {
@@ -488,6 +149,7 @@ export default function Chat() {
       fetchGroups();
       fetchUsersWithMessages();
       fetchBots();
+      fetchCurrentUserMood();
     }
   }, [session]);
 
@@ -700,6 +362,52 @@ export default function Chat() {
     }
   };
 
+  const fetchGroupName = async (inviteId: string) => {
+    try {
+      setGroupInvites(prev => ({
+        ...prev,
+        [inviteId]: { name: 'Loading...', isLoading: true }
+      }));
+
+      const response = await fetch(`/api/invites/${inviteId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setGroupInvites(prev => ({
+          ...prev,
+          [inviteId]: { name: data.groupName || 'Unknown Group', isLoading: false }
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching group name:', error);
+      setGroupInvites(prev => ({
+        ...prev,
+        [inviteId]: { name: 'Unknown Group', isLoading: false }
+      }));
+    }
+  };
+
+  const handleJoinGroup = async (inviteId: string) => {
+    try {
+      const response = await fetch(`/api/invites/${inviteId}/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        fetchGroups();
+        alert(`Successfully joined ${groupInvites[inviteId]?.name || 'group'}!`);
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Failed to join group');
+      }
+    } catch (error) {
+      console.error('Error joining group:', error);
+      alert('Failed to join group');
+    }
+  };
+
   const transformMessageContent = (content: string) => {
     const inviteLinkPattern = new RegExp(`${window.location.origin}/invite/([a-zA-Z0-9-]+)`);
     
@@ -707,11 +415,19 @@ export default function Chat() {
       const match = word.match(inviteLinkPattern);
       if (match) {
         const inviteId = match[1];
-        return <GroupInviteButton 
-          key={index} 
-          inviteId={inviteId} 
-          onGroupJoined={fetchGroups} 
-        />;
+        // Fetch group name if we don't have it yet
+        if (!groupInvites[inviteId]) {
+          fetchGroupName(inviteId);
+        }
+        return (
+          <GroupInviteButton 
+            key={index} 
+            inviteId={inviteId}
+            groupName={groupInvites[inviteId]?.name || 'Loading...'}
+            isLoading={groupInvites[inviteId]?.isLoading}
+            onJoinGroup={handleJoinGroup}
+          />
+        );
       }
       return <span key={index}>{word} </span>;
     });
@@ -857,6 +573,72 @@ export default function Chat() {
       type: 'bot',
       name: bot.name
     });
+  };
+
+  const handleFileDeleted = (fileId: string) => {
+    setFiles(prevFiles => prevFiles.filter(f => f.id !== fileId));
+    setFileListRefresh(prev => prev + 1);
+  };
+
+  // Update files when polled files change
+  useEffect(() => {
+    if (polledFiles.length > 0) {
+      setFiles(polledFiles as FileData[]);
+    }
+  }, [polledFiles]);
+
+  const handleFileSelect = async (file: File) => {
+    if (!selectedConversation) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    if (selectedConversation.type === 'group') {
+      formData.append('groupId', selectedConversation.id);
+    } else if (selectedConversation.type === 'direct') {
+      formData.append('receiverId', selectedConversation.id);
+    }
+
+    try {
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const fileData = await response.json();
+        
+        // Create a message for the file
+        const messageResponse = await fetch('/api/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            content: `FILE:${JSON.stringify(fileData)}`,
+            ...(selectedConversation.type === 'group' 
+              ? { groupId: selectedConversation.id } 
+              : { receiverId: selectedConversation.id })
+          }),
+        });
+
+        if (messageResponse.ok) {
+          setFileListRefresh(prev => prev + 1);
+        }
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Upload failed');
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Upload failed');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
   };
 
   if (status === 'loading') {
@@ -1092,13 +874,22 @@ export default function Chat() {
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-700">
-            <CurrentUserStatus statuses={statuses} />
+            <CurrentUserStatus 
+              statuses={statuses} 
+              currentMood={currentUserMood}
+              onUpdateMood={handleUpdateMood}
+            />
           </div>
         </div>
       </div>
       <div className="w-3/4 flex flex-col">
         <div className="flex-grow p-4 overflow-y-auto">
           <div className="space-y-4">
+            <FileList
+              files={files}
+              currentUserId={session.user.id}
+              onFileDeleted={handleFileDeleted}
+            />
             {messages.map((msg) => {
               const isCurrentUser = msg.sender_id === session?.user?.id;
               const isFileMessage = msg.content.startsWith('FILE:');
@@ -1216,11 +1007,9 @@ export default function Chat() {
             />
             {selectedConversation && (
               <FileUpload 
-                groupId={selectedConversation.type === 'group' ? selectedConversation.id : undefined}
-                receiverId={selectedConversation.type === 'direct' ? selectedConversation.id : undefined}
-                onUploadComplete={() => {
-                  setFileListRefresh(prev => prev + 1);
-                }}
+                isUploading={isUploading}
+                uploadProgress={uploadProgress}
+                onFileSelect={handleFileSelect}
               />
             )}
             <button 
