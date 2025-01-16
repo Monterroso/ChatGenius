@@ -92,7 +92,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Either groupId or receiverId is required' }, { status: 400 });
     }
 
-    // Get receiver type (bot or user)
+    // Ensure receiverId is null when sending to a group
+    if (groupId && receiverId) {
+      return NextResponse.json({ error: 'Cannot specify both groupId and receiverId' }, { status: 400 });
+    }
+
+    // Get receiver type (bot or user) only for direct messages
     let receiverType = 'user';
     if (receiverId) {
       const botCheck = await db.query('SELECT id FROM bot_users WHERE id = $1', [receiverId]);
