@@ -39,8 +39,10 @@ export async function GET(req: NextRequest) {
 
     // Add content search if query exists
     if (query?.trim()) {
-      conditions.push(`to_tsvector('english', m.content) @@ plainto_tsquery('english', $${paramCount})`);
-      values.push(query.trim());
+      conditions.push(`m.content ILIKE $${paramCount}`);
+      const searchTerm = `%${query.trim()}%`;
+      values.push(searchTerm);
+      console.log('Search term with wildcards:', searchTerm);
       paramCount++;
     }
 
@@ -65,24 +67,22 @@ export async function GET(req: NextRequest) {
     }
 
     // Ensure user can only search messages they have access to
-    conditions.push(`(
-      (m.sender_id = $${paramCount} AND m.sender_type = 'user')
-      OR (m.receiver_id = $${paramCount} AND m.receiver_type = 'user')
-      OR (m.receiver_id = $${paramCount} AND m.receiver_type = 'bot')
-      ${groupId ? `OR m.group_id = $${paramCount + 1}` : ''}
-    )`);
-    values.push(session.user.id);
-    values.push(session.user.id);
-    if (groupId) {
-      values.push(groupId);
-    }
+    const userId = session.user.id;
+    values.push(userId);
 
     // Build and execute the search query
     const searchQuery = `
       WITH search_results AS (
-        SELECT m.*
+        SELECT DISTINCT m.*
         FROM messages m
+        LEFT JOIN group_members gm ON m.group_id = gm.group_id AND gm.user_id = $${paramCount}
         WHERE ${conditions.join(' AND ')}
+        AND (
+          (m.sender_id = $${paramCount} AND m.sender_type = 'user')
+          OR (m.receiver_id = $${paramCount} AND m.receiver_type = 'user')
+          OR (m.receiver_id = $${paramCount} AND m.receiver_type = 'bot')
+          OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
+        )
         ORDER BY m.created_at DESC
         LIMIT 50
       )
@@ -92,14 +92,12 @@ export async function GET(req: NextRequest) {
           WHEN 'user' THEN json_build_object(
             'id', u_sender.id,
             'name', u_sender.name,
-            'username', u_sender.username,
-            'image', u_sender.image
+            'username', u_sender.username
           )
           WHEN 'bot' THEN json_build_object(
             'id', b_sender.id,
             'name', b_sender.name,
-            'username', b_sender.name,
-            'image', NULL
+            'username', b_sender.name
           )
         END as sender
       FROM search_results sr
@@ -111,7 +109,22 @@ export async function GET(req: NextRequest) {
     console.log('Search query:', searchQuery);
     console.log('Query values:', values);
 
+    console.log('Full conditions array:', conditions);
+    console.log('Full values array:', values);
+    console.log('Executing search with query:', {
+      conditions: conditions.join(' AND '),
+      parameters: values
+    });
+
     const result = await db.query(searchQuery, values);
+    
+    // Log a sample of messages for debugging
+    if (result.rows.length > 0) {
+      console.log('Sample of first message content:', result.rows[0].content);
+    } else {
+      console.log('No messages found matching the search criteria');
+    }
+    
     console.log('Search results count:', result.rows.length);
 
     return NextResponse.json(result.rows);
