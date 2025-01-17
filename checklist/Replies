@@ -1,0 +1,37 @@
+# Threaded Replies Implementation Checklist
+
+A step-by-step guide for Cursor to follow in Agent Mode.
+
+---
+
+### 1. Database Update
+1. Create a new migration to add a "reply_to_message_id" column in the "messages" table:
+   - Column definition referencing "messages(id)" for proper foreign key constraint.
+   - Optional: Add a CHECK constraint to prevent a message from replying to itself.
+
+2. (Optional) Add an index on "reply_to_message_id" if you expect large numbers of replies for performance benefits.
+
+---
+
+### 2. Create Reply Endpoint
+1. Add a new route file in your "/app/api/messages/[id]/reply/route.ts":
+   - Validate user session with "getServerSession(authOptions)".
+   - Parse the JSON body for "content".
+   - Insert a new message row, setting "reply_to_message_id" to the "[id]" parameter in the route.
+   - Return a JSON response with the newly created message details.
+
+---
+
+### 3. Create Thread Fetch Endpoint
+1. Add a new route file in "/app/api/messages/[id]/thread/route.ts":
+   - Validate user session with "getServerSession(authOptions)".
+   - Use a recursive CTE (or multiple queries) to fetch the original message and all descendants via "reply_to_message_id".
+   - Return the fetched results as a JSON array, optionally sorted by "created_at".
+
+---
+
+### 4. UI Adjustments
+1. In your main chat feed (e.g., "ChatMessages" component), hide or filter out messages that have "reply_to_message_id" so they do not appear in the main chat flow.
+2. Add a visual indicator (e.g., "View Thread") to messages that have replies. On click, fetch from the new "/app/api/messages/[id]/thread" endpoint and display them in a separate panel or modal.
+3. Create or adapt a "ThreadMessages" component to display the returned thread messages in order.
+4. Add a "Reply" button to the "ThreadMessages" component. On click, fetch from the new "/app/api/messages/[id]/reply" endpoint and display the reply form in a separate panel or modal.

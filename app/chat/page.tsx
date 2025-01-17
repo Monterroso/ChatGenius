@@ -924,6 +924,24 @@ export default function Chat() {
                 reactions={polledReactions}
                 onReactionSelect={handleReactionSelect}
                 onReactionRemove={handleReactionRemove}
+                onReply={async (messageId: string, content: string) => {
+                  try {
+                    const response = await fetch(`/api/messages/${messageId}/reply`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ content })
+                    });
+
+                    if (response.ok) {
+                      // Refresh messages after reply
+                      if (selectedConversation) {
+                        fetchMessages(selectedConversation.id, selectedConversation.type);
+                      }
+                    }
+                  } catch (error) {
+                    console.error('Error sending reply:', error);
+                  }
+                }}
                 transformMessageContent={transformMessageContent}
                 shouldScrollToBottom={
                   messages.length > 0 && 
