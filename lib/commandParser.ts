@@ -1,5 +1,5 @@
 import db from '@/lib/db';
-import { addDocumentToVectorStore, deleteDocumentsForBot } from './vectorStore';
+import { addBotKnowledge, deleteBotKnowledge } from './botKnowledge';
 
 interface CommandResult {
   type: 'command';
@@ -55,7 +55,7 @@ const BUILT_IN_COMMANDS: Record<string, Command> = {
         };
       }
 
-      await addDocumentToVectorStore(content, { source: 'user_command' }, botId);
+      await addBotKnowledge(content, { source: 'user_command' }, botId);
       return {
         type: 'command',
         response: 'I\'ve learned this information!',
@@ -66,7 +66,7 @@ const BUILT_IN_COMMANDS: Record<string, Command> = {
   forget: {
     description: 'Remove all learned knowledge',
     handler: async (botId: string): Promise<CommandResult> => {
-      await deleteDocumentsForBot(botId);
+      await deleteBotKnowledge(botId);
       return {
         type: 'command',
         response: 'I\'ve forgotten all learned information.',

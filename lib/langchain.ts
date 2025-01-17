@@ -1,17 +1,12 @@
 import { ChatOpenAI } from '@langchain/openai';
-import { PineconeStore } from '@langchain/pinecone';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { Pinecone } from '@pinecone-database/pinecone';
 import { ConversationalRetrievalQAChain } from 'langchain/chains';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
+import { PostgreSQLVectorStore } from './pgVectorStore';
 import db from '@/lib/db';
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error('Missing OpenAI API Key');
-}
-
-if (!process.env.PINECONE_API_KEY || !process.env.PINECONE_INDEX) {
-  throw new Error('Missing Pinecone API Key or Index');
 }
 
 // Initialize the LLM
@@ -20,13 +15,6 @@ export const llm = new ChatOpenAI({
   temperature: 0.7,
   openAIApiKey: process.env.OPENAI_API_KEY,
 });
-
-// Initialize Pinecone Client
-export const initPinecone = async () => {
-  return new Pinecone({
-    apiKey: process.env.PINECONE_API_KEY!,
-  });
-};
 
 // Initialize embeddings
 export const embeddings = new OpenAIEmbeddings({
@@ -37,16 +25,11 @@ export const embeddings = new OpenAIEmbeddings({
 
 // Initialize vector store
 export const initVectorStore = async () => {
-  const pinecone = await initPinecone();
-  const index = pinecone.Index(process.env.PINECONE_INDEX!);
-  
-  return await PineconeStore.fromExistingIndex(embeddings, {
-    pineconeIndex: index,
-  });
+  return await PostgreSQLVectorStore.fromExistingIndex(embeddings);
 };
 
 // Create a conversational chain
-export const createConversationalChain = async (vectorStore: PineconeStore, botId: string) => {
+export const createConversationalChain = async (vectorStore: PostgreSQLVectorStore, botId: string) => {
   const retriever = vectorStore.asRetriever({
     filter: { botId },
     k: 5

@@ -1,4 +1,4 @@
-import { searchSimilarDocuments } from './vectorStore';
+import { searchBotKnowledge } from './botKnowledge';
 import db from '@/lib/db';
 
 interface Message {
@@ -86,7 +86,7 @@ export class ContextManager {
       // Update metadata
       if (role === 'user') {
         // Find relevant documents for user messages
-        const relevantDocs = await searchSimilarDocuments(message, this.botId, 3);
+        const relevantDocs = await searchBotKnowledge(message, this.botId, 3);
         this.context.metadata.relevantDocuments = relevantDocs.map(doc => doc.pageContent);
         
         // Extract and store topics (you could use an NLP service here)
@@ -121,7 +121,7 @@ export class ContextManager {
   }> {
     try {
       // Get relevant documents
-      const relevantDocs = await searchSimilarDocuments(message, this.botId, 3);
+      const relevantDocs = await searchBotKnowledge(message, this.botId, 3);
 
       return {
         recentMessages: this.context.messages,

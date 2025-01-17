@@ -295,8 +295,16 @@ export default function Chat() {
         });
 
         if (response.ok) {
+          const data = await response.json();
           setMessage('');
-          fetchMessages(selectedConversation.id, selectedConversation.type);
+          
+          // If we got both original and automated response, update messages directly
+          if (data.original && data.automated_response) {
+            setMessages(prev => [...prev, data.original, data.automated_response]);
+          } else {
+            // Otherwise fetch all messages
+            fetchMessages(selectedConversation.id, selectedConversation.type);
+          }
         } else {
           setMessageError();
         }

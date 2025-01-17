@@ -1,5 +1,5 @@
 import { createConversationalChain, formatChatHistory, initVectorStore, embeddings } from './langchain';
-import { searchSimilarDocuments } from './vectorStore';
+import { searchBotKnowledge } from './botKnowledge';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import db from '@/lib/db';
 
@@ -13,7 +13,11 @@ export async function processQuery(
   botId: string,
   userId: string
 ) {
+  const debugId = Math.random().toString(36).substring(7);
+  console.log(`[RAG-${debugId}] Starting processQuery - Query: "${query}", BotId: ${botId}, UserId: ${userId}`);
+  
   try {
+    console.log(`[RAG-${debugId}] Fetching recent direct conversation history`);
     // Get recent direct conversation history between user and this bot
     const result = await db.query(
       `SELECT m.id, m.content, m.created_at, m.sender_id, m.receiver_id, m.group_id, m.deleted_at,
@@ -28,7 +32,9 @@ export async function processQuery(
        LIMIT 10`,
       [botId, userId]
     );
+    console.log(`[RAG-${debugId}] Found ${result.rows.length} direct conversation messages`);
 
+    console.log(`[RAG-${debugId}] Fetching user's message history across all conversations`);
     // Get user's message history across all conversations
     const userHistoryResult = await db.query(
       `SELECT 
@@ -61,37 +67,24 @@ export async function processQuery(
        LIMIT 100`,
       [userId, botId]
     );
+    console.log(`[RAG-${debugId}] Found ${userHistoryResult.rows.length} historical messages`);
 
+    console.log(`[RAG-${debugId}] Initializing vector store`);
     // Initialize vector store
     const vectorStore = await initVectorStore();
+    console.log(`[RAG-${debugId}] Vector store initialized successfully`);
     
-    // Store messages in vector store if not already stored
-    const historicalMessages = userHistoryResult.rows;
-    for (const msg of historicalMessages) {
-      const formattedContent = `[To ${msg.context_type}: ${msg.receiver_name}] ${msg.content}`;
-      await vectorStore.addDocuments([{
-        pageContent: formattedContent,
-        metadata: {
-          id: msg.id,
-          created_at: msg.created_at,
-          sender_id: msg.sender_id,
-          receiver_id: msg.receiver_id,
-          receiver_type: msg.receiver_type,
-          receiver_name: msg.receiver_name,
-          context_type: msg.context_type,
-          group_id: msg.group_id,
-          deleted_at: msg.deleted_at,
-          isUserMessage: true,
-          userId: userId
-        }
-      }]);
-    }
-
+    console.log(`[RAG-${debugId}] Searching for relevant messages`);
     // Search for relevant messages using vector store
     const relevantDocs = await vectorStore.similaritySearch(query, 5, { 
       isUserMessage: true,
       userId: userId
     });
+    console.log(`[RAG-${debugId}] Found ${relevantDocs.length} relevant documents`);
+    console.log(`[RAG-${debugId}] Relevant docs:`, relevantDocs.map(doc => ({
+      content: doc.pageContent.substring(0, 50) + '...',
+      metadata: doc.metadata
+    })));
 
     // Format relevant messages
     const relevantMessages = relevantDocs.map(doc => ({
@@ -100,6 +93,7 @@ export async function processQuery(
       metadata: doc.metadata
     }));
 
+    console.log(`[RAG-${debugId}] Formatting conversation messages`);
     // Format current conversation messages
     const messages = result.rows.reverse().map(msg => ({
       role: msg.role,
@@ -114,28 +108,35 @@ export async function processQuery(
       }
     }));
 
+    console.log(`[RAG-${debugId}] Creating conversation chain`);
     // Initialize conversation chain
     const chain = await createConversationalChain(vectorStore, botId);
+    console.log(`[RAG-${debugId}] Conversation chain created successfully`);
 
     // Format both direct conversation history and relevant messages as AIMessage/HumanMessage
+    console.log(`[RAG-${debugId}] Formatting chat histories`);
     const directChatHistory = formatChatHistory(messages);
     const relevantChatHistory = formatChatHistory(relevantMessages);
     
     // Combine histories, putting relevant messages first (as context) followed by direct conversation
     const combinedHistory = [...relevantChatHistory, ...directChatHistory];
+    console.log(`[RAG-${debugId}] Combined history length: ${combinedHistory.length}`);
 
+    console.log(`[RAG-${debugId}] Invoking LLM chain`);
     // Get response from the LLM
     const response = await chain.invoke({
       question: query,
       chat_history: combinedHistory
     });
+    console.log(`[RAG-${debugId}] LLM response received successfully`);
+    console.log(`[RAG-${debugId}] Response text: "${response.text.substring(0, 100)}..."`);
 
     return {
       answer: response.text,
       sourceDocuments: response.sourceDocuments
     };
   } catch (error) {
-    console.error('Error processing query:', error);
+    console.error(`[RAG-${debugId}] Error in processQuery:`, error);
     throw error;
   }
 }
@@ -149,6 +150,9 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 
 export async function getConversationHistory(botId: string, userId: string) {
+  const debugId = Math.random().toString(36).substring(7);
+  console.log(`[RAG-${debugId}] Getting conversation history - BotId: ${botId}, UserId: ${userId}`);
+  
   try {
     const result = await db.query(
       `SELECT m.*, 
@@ -162,13 +166,16 @@ export async function getConversationHistory(botId: string, userId: string) {
        ORDER BY m.created_at ASC`,
       [botId, userId]
     );
+    console.log(`[RAG-${debugId}] Found ${result.rows.length} conversation history messages`);
 
-    return result.rows.map(msg => ({
+    const messages = result.rows.map(msg => ({
       role: msg.role,
       content: msg.content
     }));
+    
+    return messages;
   } catch (error) {
-    console.error('Error getting conversation history:', error);
+    console.error(`[RAG-${debugId}] Error getting conversation history:`, error);
     throw error;
   }
 }

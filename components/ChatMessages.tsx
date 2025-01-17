@@ -12,9 +12,10 @@
  */
 
 import { useRef, useEffect } from 'react';
-import { File } from 'lucide-react';
+import { File, Bot } from 'lucide-react';
 import type { DBMessage, FileData } from '@/types/db';
 import { MessageReactions } from './MessageReactions';
+import { BotMessage } from './BotMessage';
 
 interface ChatMessagesProps {
   messages: DBMessage[];
@@ -73,6 +74,7 @@ export default function ChatMessages({
             const isCurrentUser = msg.sender_id === currentUserId;
             const isFileMessage = msg.content.startsWith('FILE:');
             const isBot = bots.some(bot => bot.id === msg.sender_id);
+            const isAutomatedResponse = msg.is_automated_response;
             const senderName = isCurrentUser 
               ? currentUsername
               : isBot
@@ -125,16 +127,61 @@ export default function ChatMessages({
               );
             }
 
+            // Handle bot messages
+            if (isBot) {
+              console.log('Bot Message:', {
+                id: msg.id,
+                content: msg.content,
+                created_at: msg.created_at,
+                source_documents: msg.source_documents,
+                sender_id: msg.sender_id
+              });
+              return (
+                <div key={msg.id} className="flex justify-start">
+                  <div className="max-w-[70%]">
+                    <BotMessage
+                      content={msg.content}
+                      timestamp={new Date(msg.created_at)}
+                      sourceDocuments={msg.source_documents ?? undefined}
+                      onFeedback={async (rating: number, feedbackText?: string) => {
+                        // TODO: Implement feedback handling
+                        console.log('Bot message feedback:', { messageId: msg.id, rating, feedbackText });
+                      }}
+                    />
+                    <div className="mt-2">
+                      <MessageReactions
+                        messageId={msg.id}
+                        reactions={reactions[msg.id] || {}}
+                        onReactionSelect={(emoji) => onReactionSelect(msg.id, emoji)}
+                        onReactionRemove={(emoji) => onReactionRemove(msg.id, emoji)}
+                        currentUserId={currentUserId}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Regular messages
             return (
               <div 
                 key={msg.id}
                 className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`max-w-[70%] rounded-lg p-3 ${
-                  isCurrentUser ? 'bg-primary text-primary-foreground' : isBot ? 'bg-blue-100' : 'bg-gray-100'
+                  isCurrentUser 
+                    ? 'bg-primary text-primary-foreground' 
+                    : isAutomatedResponse
+                      ? 'bg-purple-100'
+                      : 'bg-gray-100'
                 }`}>
-                  <div className="text-sm font-semibold mb-1">
-                    {isBot ? `🤖 ${senderName}` : senderName}
+                  <div className="text-sm font-semibold mb-1 flex items-center gap-2">
+                    {senderName}
+                    {isAutomatedResponse && (
+                      <span className="text-xs bg-purple-200 px-2 py-0.5 rounded-full">
+                        Auto-Response
+                      </span>
+                    )}
                   </div>
                   <div className="break-words">
                     {transformMessageContent(msg.content)}
@@ -143,7 +190,11 @@ export default function ChatMessages({
                     {new Date(msg.created_at).toLocaleTimeString()}
                   </div>
                   <div className={`mt-2 text-gray-600 ${
-                    isCurrentUser ? 'bg-primary' : isBot ? 'bg-blue-100' : 'bg-gray-100'
+                    isCurrentUser 
+                      ? 'bg-primary' 
+                      : isAutomatedResponse
+                        ? 'bg-purple-100'
+                        : 'bg-gray-100'
                   }`}>
                     <MessageReactions
                       messageId={msg.id}
