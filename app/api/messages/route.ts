@@ -242,18 +242,8 @@ export async function POST(request: Request) {
         const response = await processQuery(contextPrompt, receiverId, session.user.id);
         console.log(`[${requestId}] RAG system generated response successfully`);
         
-        console.log(`[${requestId}] Fetching system bot ID`);
-        const result = await db.query('SELECT get_system_bot_id()', []);
-        const systemBotId = result.rows[0]?.get_system_bot_id as string;
-
-        if (!systemBotId) {
-          console.error(`[${requestId}] System bot not found`);
-          return NextResponse.json(message);
-        }
-        console.log(`[${requestId}] System bot ID retrieved: ${systemBotId}`);
-        
-        console.log(`[${requestId}] Inserting bot response`);
-        const botResponse = await db.query(
+        console.log(`[${requestId}] Inserting automated response as offline user`);
+        const automatedResponse = await db.query(
           `INSERT INTO messages (
             content, 
             sender_id, 
@@ -266,50 +256,50 @@ export async function POST(request: Request) {
           RETURNING *`,
           [
             response.answer,
-            systemBotId,
+            receiverId, // Send as the offline user
             session.user.id,
-            'bot',
+            'user', // Keep as user type since it's from the offline user
             'user',
             true,
             message.id
           ]
         );
-        console.log(`[${requestId}] Bot response inserted successfully with ID: ${botResponse.rows[0]?.id}`);
+        console.log(`[${requestId}] Automated response inserted successfully with ID: ${automatedResponse.rows[0]?.id}`);
 
-        if (botResponse.rows[0]) {
+        if (automatedResponse.rows[0]) {
           try {
-            console.log(`[${requestId}] Creating embedding for bot response`);
+            console.log(`[${requestId}] Creating embedding for automated response`);
             const responseEmbedding = await createEmbedding(response.answer);
             await storeMessageEmbedding(
-              botResponse.rows[0].id,
+              automatedResponse.rows[0].id,
               responseEmbedding,
               {
-                sender_id: systemBotId,
+                sender_id: receiverId,
                 receiver_id: session.user.id,
                 timestamp: new Date(),
                 is_automated_response: true,
-                sender_type: 'bot',
+                sender_type: 'user',
                 receiver_type: 'user'
               }
             );
-            console.log(`[${requestId}] Bot response embedding stored successfully`);
+            console.log(`[${requestId}] Automated response embedding stored successfully`);
 
             console.log(`[${requestId}] Returning both original message and automated response`);
             return NextResponse.json({
               original: message,
-              automated_response: botResponse.rows[0]
+              automated_response: automatedResponse.rows[0]
             });
           } catch (embeddingError) {
-            console.error(`[${requestId}] Error creating embedding for bot response:`, embeddingError);
+            console.error(`[${requestId}] Error creating embedding for automated response:`, embeddingError);
             // Return both messages even if embedding fails
             return NextResponse.json({
               original: message,
-              automated_response: botResponse.rows[0]
+              automated_response: automatedResponse.rows[0]
             });
           }
         }
 
-        console.log(`[${requestId}] Bot response creation failed, returning original message only`);
+        console.log(`[${requestId}] Automated response creation failed, returning original message only`);
         return NextResponse.json(message);
       } catch (error) {
         console.error(`[${requestId}] Error generating automated response:`, error);
