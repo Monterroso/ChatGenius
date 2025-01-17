@@ -18,6 +18,7 @@ import { BotMessage } from './BotMessage';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useThreadPolling } from '@/hooks/useThreadPolling';
 
 interface ThreadMessagesProps {
   messages: DBMessage[];
@@ -40,7 +41,7 @@ const formatFileSize = (bytes: number) => {
 };
 
 export default function ThreadMessages({
-  messages,
+  messages: initialMessages,
   currentUserId,
   currentUsername,
   users,
@@ -59,7 +60,20 @@ export default function ThreadMessages({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Get the parent message (first message in the thread)
-  const parentMessage = messages[0];
+  const parentMessage = initialMessages[0];
+
+  // Use thread polling
+  const {
+    messages,
+    error: threadError,
+    isPolling: isThreadPolling
+  } = useThreadPolling({
+    messageId: parentMessage?.id || null,
+    enabled: !!parentMessage
+  });
+
+  // Use polled messages if available, otherwise use initial messages
+  const displayMessages = messages.length > 0 ? messages : initialMessages;
 
   const handleReply = async (messageId: string) => {
     if (!replyContent.trim()) return;
@@ -98,7 +112,7 @@ export default function ThreadMessages({
         className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
       >
         <div className="p-4 space-y-4">
-          {messages.map((msg) => {
+          {displayMessages.map((msg) => {
             const isCurrentUser = msg.sender_id === currentUserId;
             const isFileMessage = msg.content.startsWith('FILE:');
             const isBot = bots.some(bot => bot.id === msg.sender_id);
