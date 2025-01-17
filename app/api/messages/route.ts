@@ -3,7 +3,8 @@
  * It supports:
  * - GET /api/messages: Fetches recent messages from a group or a direct conversation.
  * - POST /api/messages: Creates a new message, stores its embedding, and optionally triggers
- *   an automated response if the recipient is away/offline.
+ *   an automated response if the recipient is away/offline. The automated response is processed
+ *   asynchronously to ensure quick response times for the user.
  */
 
 import { getServerSession } from "next-auth";
@@ -100,16 +101,18 @@ export async function GET(request: Request) {
 /**
  * POST /api/messages
  * Creates a new message in either a group or a direct message channel.
- * Once created, it also:
- * - Generates and stores embeddings for the new message.
- * - If the recipient is away/offline, generates and stores an automated response from the system bot.
+ * The function:
+ * 1. Stores the message in the database immediately
+ * 2. Returns a success response to the client
+ * 3. Asynchronously:
+ *    - Generates and stores embeddings for the message
+ *    - If recipient is away/offline, generates and stores an automated response
  */
 export async function POST(request: Request) {
-  const requestId = Math.random().toString(36).substring(7); // Generate unique ID for request tracking
+  const requestId = Math.random().toString(36).substring(7);
   console.log(`[${requestId}] Starting POST /api/messages request`);
   
   try {
-    // Check user session; if user is unauthorized, respond with 401.
     const session = await getServerSession(authOptions);
     if (!session) {
       console.log(`[${requestId}] Authentication failed: No valid session found`);
@@ -117,7 +120,6 @@ export async function POST(request: Request) {
     }
     console.log(`[${requestId}] Authentication successful for user: ${session.user.id}`);
 
-    // Parse the request body to extract message details.
     const body = await request.json();
     const { content, groupId, receiverId } = body;
     console.log(`[${requestId}] Request parameters - groupId: ${groupId}, receiverId: ${receiverId}`);
@@ -136,34 +138,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cannot specify both groupId and receiverId' }, { status: 400 });
     }
 
-    // Determine if the receiver is a user or a bot (for direct messages).
+    // Determine if the receiver is a user or a bot
     let receiverType: 'user' | 'bot' = 'user';
     if (receiverId) {
       const botCheck = await db.query('SELECT id FROM bot_users WHERE id = $1', [receiverId]);
       console.log(`[${requestId}] Receiver type check - Is bot: ${botCheck.rows.length > 0}`);
       if (botCheck.rows.length > 0) {
         receiverType = 'bot';
-      }
-    }
-
-    // Determine if the message should trigger an automated response based on the recipient's status.
-    let shouldGenerateResponse = false;
-    let receiverStatus = null;
-    
-    if (receiverId && receiverType === 'user') {
-      console.log(`[${requestId}] Checking recipient status for user: ${receiverId}`);
-      const statusResult = await db.query(
-        `SELECT * FROM user_status WHERE user_id = $1`,
-        [receiverId]
-      );
-      
-      if (statusResult.rows.length > 0) {
-        const status = statusResult.rows[0];
-        receiverStatus = calculateEffectiveStatus(status);
-        shouldGenerateResponse = receiverStatus.status === 'away' || receiverStatus.status === 'offline';
-        console.log(`[${requestId}] Recipient status: ${receiverStatus.status}, Should generate response: ${shouldGenerateResponse}`);
-      } else {
-        console.log(`[${requestId}] No status found for recipient ${receiverId}`);
       }
     }
 
@@ -192,9 +173,10 @@ export async function POST(request: Request) {
     const message = result.rows[0];
     console.log(`[${requestId}] Message inserted successfully with ID: ${message.id}`);
 
-    // Create and store embeddings only if the message was successfully created.
-    if (message) {
+    // Process message asynchronously (embeddings and automated responses)
+    (async () => {
       try {
+        // Create and store embeddings
         console.log(`[${requestId}] Creating embedding for message: ${message.id}`);
         const embedding = await createEmbedding(content);
         console.log(`[${requestId}] Embedding created successfully`);
@@ -212,101 +194,101 @@ export async function POST(request: Request) {
           }
         );
         console.log(`[${requestId}] Embedding stored successfully for message: ${message.id}`);
-      } catch (embeddingError) {
-        console.error(`[${requestId}] Error creating/storing embedding:`, embeddingError);
-      }
-    }
 
-    // If the recipient is away/offline, generate and store an automated response from the system bot.
-    if (shouldGenerateResponse) {
-      console.log(`[${requestId}] Starting automated response generation`);
-      try {
-        // Gather recent messages from the recipient for context
-        console.log(`[${requestId}] Fetching recent messages for context`);
-        const { rows: recentMessages } = await db.query(
-          `SELECT content 
-           FROM messages 
-           WHERE sender_id = $1 
-             AND sender_type = 'user'
-             AND created_at > NOW() - INTERVAL '7 days'
-           ORDER BY created_at DESC 
-           LIMIT 10`,
-          [receiverId]
-        );
-        console.log(`[${requestId}] Found ${recentMessages.length} recent messages for context`);
+        // Check if we need to generate an automated response
+        if (receiverId && receiverType === 'user') {
+          console.log(`[${requestId}] Checking recipient status for user: ${receiverId}`);
+          const statusResult = await db.query(
+            `SELECT * FROM user_status WHERE user_id = $1`,
+            [receiverId]
+          );
+          
+          if (statusResult.rows.length > 0) {
+            const status = statusResult.rows[0];
+            const receiverStatus = calculateEffectiveStatus(status);
+            const shouldGenerateResponse = receiverStatus.status === 'away' || receiverStatus.status === 'offline';
+            console.log(`[${requestId}] Recipient status: ${receiverStatus.status}, Should generate response: ${shouldGenerateResponse}`);
 
-        const messageHistory = recentMessages.map(m => m.content).join('\n');
-        const contextPrompt = `Based on the user's recent messages:\n${messageHistory}\n\nRespond to: ${content}`;
-        
-        console.log(`[${requestId}] Processing query through RAG system`);
-        const response = await processQuery(contextPrompt, receiverId, session.user.id);
-        console.log(`[${requestId}] RAG system generated response successfully`);
-        
-        console.log(`[${requestId}] Inserting automated response as offline user`);
-        const automatedResponse = await db.query(
-          `INSERT INTO messages (
-            content, 
-            sender_id, 
-            receiver_id, 
-            sender_type,
-            receiver_type,
-            is_automated_response,
-            original_message_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
-          RETURNING *`,
-          [
-            response.answer,
-            receiverId, // Send as the offline user
-            session.user.id,
-            'user', // Keep as user type since it's from the offline user
-            'user',
-            true,
-            message.id
-          ]
-        );
-        console.log(`[${requestId}] Automated response inserted successfully with ID: ${automatedResponse.rows[0]?.id}`);
+            if (shouldGenerateResponse) {
+              console.log(`[${requestId}] Starting automated response generation`);
+              try {
+                // Gather recent messages for context
+                console.log(`[${requestId}] Fetching recent messages for context`);
+                const { rows: recentMessages } = await db.query(
+                  `SELECT content 
+                   FROM messages 
+                   WHERE sender_id = $1 
+                     AND sender_type = 'user'
+                     AND created_at > NOW() - INTERVAL '7 days'
+                   ORDER BY created_at DESC 
+                   LIMIT 10`,
+                  [receiverId]
+                );
+                console.log(`[${requestId}] Found ${recentMessages.length} recent messages for context`);
 
-        if (automatedResponse.rows[0]) {
-          try {
-            console.log(`[${requestId}] Creating embedding for automated response`);
-            const responseEmbedding = await createEmbedding(response.answer);
-            await storeMessageEmbedding(
-              automatedResponse.rows[0].id,
-              responseEmbedding,
-              {
-                sender_id: receiverId,
-                receiver_id: session.user.id,
-                timestamp: new Date(),
-                is_automated_response: true,
-                sender_type: 'user',
-                receiver_type: 'user'
+                const messageHistory = recentMessages.map(m => m.content).join('\n');
+                const contextPrompt = `Based on the user's recent messages:\n${messageHistory}\n\nRespond to: ${content}`;
+                
+                console.log(`[${requestId}] Processing query through RAG system`);
+                const response = await processQuery(contextPrompt, receiverId, session.user.id);
+                console.log(`[${requestId}] RAG system generated response successfully`);
+                
+                console.log(`[${requestId}] Inserting automated response as offline user`);
+                const automatedResponse = await db.query(
+                  `INSERT INTO messages (
+                    content, 
+                    sender_id, 
+                    receiver_id, 
+                    sender_type,
+                    receiver_type,
+                    is_automated_response,
+                    original_message_id
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
+                  RETURNING *`,
+                  [
+                    response.answer,
+                    receiverId,
+                    session.user.id,
+                    'user',
+                    'user',
+                    true,
+                    message.id
+                  ]
+                );
+                console.log(`[${requestId}] Automated response inserted successfully with ID: ${automatedResponse.rows[0]?.id}`);
+
+                // Create embedding for automated response
+                try {
+                  console.log(`[${requestId}] Creating embedding for automated response`);
+                  const responseEmbedding = await createEmbedding(response.answer);
+                  await storeMessageEmbedding(
+                    automatedResponse.rows[0].id,
+                    responseEmbedding,
+                    {
+                      sender_id: receiverId,
+                      receiver_id: session.user.id,
+                      timestamp: new Date(),
+                      is_automated_response: true,
+                      sender_type: 'user',
+                      receiver_type: 'user'
+                    }
+                  );
+                  console.log(`[${requestId}] Automated response embedding stored successfully`);
+                } catch (embeddingError) {
+                  console.error(`[${requestId}] Error creating embedding for automated response:`, embeddingError);
+                }
+              } catch (error) {
+                console.error(`[${requestId}] Error generating automated response:`, error);
               }
-            );
-            console.log(`[${requestId}] Automated response embedding stored successfully`);
-
-            console.log(`[${requestId}] Returning both original message and automated response`);
-            return NextResponse.json({
-              original: message,
-              automated_response: automatedResponse.rows[0]
-            });
-          } catch (embeddingError) {
-            console.error(`[${requestId}] Error creating embedding for automated response:`, embeddingError);
-            // Return both messages even if embedding fails
-            return NextResponse.json({
-              original: message,
-              automated_response: automatedResponse.rows[0]
-            });
+            }
           }
         }
-
-        console.log(`[${requestId}] Automated response creation failed, returning original message only`);
-        return NextResponse.json(message);
       } catch (error) {
-        console.error(`[${requestId}] Error generating automated response:`, error);
-        return NextResponse.json(message);
+        console.error(`[${requestId}] Error in async processing:`, error);
       }
-    }
+    })();
 
+    // Return success immediately after storing the message
     console.log(`[${requestId}] Request completed successfully - returning message`);
     return NextResponse.json(message);
   } catch (error) {

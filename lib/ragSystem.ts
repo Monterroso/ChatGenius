@@ -1,6 +1,4 @@
 import { createConversationalChain, formatChatHistory, initVectorStore, embeddings } from './langchain';
-import { searchBotKnowledge } from './botKnowledge';
-import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import db from '@/lib/db';
 
 interface Message {

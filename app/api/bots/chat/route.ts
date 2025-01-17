@@ -6,6 +6,14 @@ import { processQuery } from '@/lib/ragSystem';
 import { parseCommand } from '@/lib/commandParser';
 import db from '@/lib/db';
 
+/**
+ * POST /api/bots/chat
+ * Handles chat messages sent to bots. The function:
+ * 1. Stores the user's message immediately
+ * 2. Returns a success response to the client
+ * 3. Processes the bot's response asynchronously
+ * 4. Stores the bot's response in the database when ready
+ */
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -21,8 +29,8 @@ export async function POST(req: Request) {
     const { message, isInitializing } = await req.json();
 
     // Store user's message
-    await db.query(
-      'INSERT INTO messages (content, sender_id, receiver_id, sender_type, receiver_type) VALUES ($1, $2, $3, $4, $5)',
+    const userMessageResult = await db.query(
+      'INSERT INTO messages (content, sender_id, receiver_id, sender_type, receiver_type) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [message, session.user.id, botInfo.botId, 'user', 'bot']
     );
 
@@ -31,39 +39,44 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true });
     }
 
-    // Check if message is a command
-    if (message.startsWith('/')) {
-      const commandResult = await parseCommand(message, botInfo.botId, session.user.id);
-      
-      // Store bot's response
-      await db.query(
-        'INSERT INTO messages (content, sender_id, receiver_id, sender_type, receiver_type) VALUES ($1, $2, $3, $4, $5)',
-        [commandResult.response, botInfo.botId, session.user.id, 'bot', 'user']
-      );
-      
-      return NextResponse.json({
-        answer: commandResult.response,
-        success: commandResult.success,
-        type: 'command'
-      });
-    }
+    // Process bot response asynchronously
+    (async () => {
+      try {
+        let botResponse;
+        
+        // Check if message is a command
+        if (message.startsWith('/')) {
+          const commandResult = await parseCommand(message, botInfo.botId, session.user.id);
+          botResponse = commandResult.response;
+        } else {
+          // Process message through RAG system
+          const response = await processQuery(
+            message,
+            botInfo.botId,
+            session.user.id
+          );
+          botResponse = response.answer;
+        }
 
-    // Process message through RAG system
-    const response = await processQuery(
-      message,
-      botInfo.botId,
-      session.user.id
-    );
+        // Store bot's response
+        await db.query(
+          'INSERT INTO messages (content, sender_id, receiver_id, sender_type, receiver_type) VALUES ($1, $2, $3, $4, $5)',
+          [botResponse, botInfo.botId, session.user.id, 'bot', 'user']
+        );
+      } catch (error) {
+        console.error('Error processing bot response:', error);
+        // Store error message as bot response
+        await db.query(
+          'INSERT INTO messages (content, sender_id, receiver_id, sender_type, receiver_type, is_error) VALUES ($1, $2, $3, $4, $5, $6)',
+          ['Sorry, I encountered an error processing your message.', botInfo.botId, session.user.id, 'bot', 'user', true]
+        );
+      }
+    })();
 
-    // Store bot's response
-    await db.query(
-      'INSERT INTO messages (content, sender_id, receiver_id, sender_type, receiver_type) VALUES ($1, $2, $3, $4, $5)',
-      [response.answer, botInfo.botId, session.user.id, 'bot', 'user']
-    );
-
-    return NextResponse.json({
-      answer: response.answer,
-      sourceDocuments: response.sourceDocuments
+    // Return success immediately after storing user message
+    return NextResponse.json({ 
+      success: true,
+      message: userMessageResult.rows[0]
     });
   } catch (error) {
     console.error('Error processing message:', error);
