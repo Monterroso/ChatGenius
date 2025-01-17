@@ -53,10 +53,6 @@ export function useStatusPolling(
       }
     };
 
-    // Initial fetch
-    fetchStatuses();
-
-    // Set up polling interval
     const pollInterval = setInterval(fetchStatuses, interval);
 
     // Add listener for immediate polling when user returns

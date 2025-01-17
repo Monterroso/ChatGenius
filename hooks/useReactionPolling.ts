@@ -68,8 +68,6 @@ export const useReactionPolling = ({
   useEffect(() => {
     if (!enabled || !messageIds.length) return;
 
-    fetchReactions();
-
     const intervalId = setInterval(fetchReactions, interval);
 
     const handleUserReturn = () => {

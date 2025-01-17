@@ -37,9 +37,6 @@ export function useMessagePolling(
 
     if (selectedConversation) {
       setIsPolling(true);
-      // Initial fetch
-      fetchMessages();
-      // Start polling
       pollTimer = setInterval(fetchMessages, pollingInterval);
     }
 

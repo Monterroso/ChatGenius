@@ -53,9 +53,6 @@ export function useMoodPolling(
       }
     };
 
-    // Initial fetch
-    fetchMoods();
-
     // Set up polling interval
     const pollInterval = setInterval(fetchMoods, interval);
 

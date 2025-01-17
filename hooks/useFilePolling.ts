@@ -74,7 +74,7 @@ export function useFilePolling({
       }
     };
 
-    pollFiles();
+    timeoutId = setTimeout(pollFiles, interval);
 
     return () => {
       mounted = false;
