@@ -23,11 +23,9 @@ import { createEmbedding, storeMessageEmbedding } from '@/lib/embeddings';
  */
 export async function GET(request: Request) {
   const requestId = Math.random().toString(36).substring(7);
-  console.log(`[${requestId}] 🔍 GET /api/messages - Starting request`);
   
   try {
     const session = await getServerSession(authOptions);
-    console.log(`[${requestId}] 🔐 Auth check - Session exists: ${!!session}`);
 
     if (!session) {
       console.log(`[${requestId}] ❌ Authentication failed: No valid session`);
@@ -37,15 +35,12 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const groupId = searchParams.get('groupId');
     const userId = searchParams.get('userId');
-    
-    console.log(`[${requestId}] 📝 Request parameters - groupId: ${groupId}, userId: ${userId}, requestingUser: ${session.user.id}`);
 
     if (!groupId && !userId) {
       console.log(`[${requestId}] ❌ Missing required parameters: No groupId or userId provided`);
       return NextResponse.json({ error: 'Either groupId or userId is required' }, { status: 400 });
     }
 
-    // Start building our SQL query dynamically based on provided parameters.
     let query = `
       SELECT 
         m.*,
@@ -79,7 +74,6 @@ export async function GET(request: Request) {
     if (groupId) {
       query += ` AND m.group_id = $${paramCount}`;
       params.push(groupId);
-      console.log(`[${requestId}] 🔍 Querying for group messages - groupId: ${groupId}`);
     } else if (userId) {
       query += ` AND (
         (m.sender_id = $${paramCount} AND m.receiver_id = $${paramCount + 1})
@@ -87,26 +81,17 @@ export async function GET(request: Request) {
         (m.sender_id = $${paramCount + 1} AND m.receiver_id = $${paramCount})
       )`;
       params.push(session.user.id, userId);
-      console.log(`[${requestId}] 🔍 Querying for direct messages between users: ${session.user.id} and ${userId}`);
     }
 
-    // Order by newest messages first and limit to 50
     query += ' ORDER BY m.created_at DESC LIMIT 50';
-    console.log(`[${requestId}] 📊 Executing query with params:`, params);
 
     const { rows: messages } = await db.query(query, params);
-    console.log(`[${requestId}] ✅ Query successful - Retrieved ${messages.length} messages`);
     
-    if (messages.length === 0) {
-      console.log(`[${requestId}] ℹ️ No messages found for the given parameters`);
-    } else {
-      console.log(`[${requestId}] 📅 Message date range: ${new Date(messages[0].created_at)} to ${new Date(messages[messages.length - 1].created_at)}`);
+    if (messages.length > 0) {
+      console.log(`[${requestId}] Retrieved ${messages.length} messages`);
     }
 
-    // Reverse the messages array to display in chronological order (oldest to newest)
     const orderedMessages = [...messages].reverse();
-    console.log(`[${requestId}] 🔄 Reversed message order for chronological display`);
-
     return NextResponse.json(orderedMessages);
   } catch (error) {
     console.error(`[${requestId}] 🔥 Error fetching messages:`, error);
@@ -126,11 +111,9 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   const requestId = Math.random().toString(36).substring(7);
-  console.log(`[${requestId}] 📨 Starting POST /api/messages request`);
   
   try {
     const session = await getServerSession(authOptions);
-    console.log(`[${requestId}] 🔐 Auth check - Session exists: ${!!session}, User: ${session?.user?.id}`);
 
     if (!session) {
       console.log(`[${requestId}] ❌ Authentication failed: No valid session found`);
@@ -139,12 +122,6 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const { content, groupId, receiverId } = body;
-    console.log(`[${requestId}] 📝 Message details:
-      - Content length: ${content?.length || 0}
-      - GroupId: ${groupId || 'none'}
-      - ReceiverId: ${receiverId || 'none'}
-      - SenderId: ${session.user.id}
-    `);
 
     // Basic validations
     if (!content) {
@@ -164,14 +141,9 @@ export async function POST(request: Request) {
     let receiverType: 'user' | 'bot' = 'user';
     if (receiverId) {
       const botCheck = await db.query('SELECT id FROM bot_users WHERE id = $1', [receiverId]);
-      const isBot = botCheck.rows.length > 0;
-      console.log(`[${requestId}] 🤖 Receiver type check - Is bot: ${isBot}`);
-      if (isBot) {
-        receiverType = 'bot';
-      }
+      receiverType = botCheck.rows.length > 0 ? 'bot' : 'user';
     }
 
-    console.log(`[${requestId}] 💾 Attempting to insert new message into database`);
     const insertQuery = `INSERT INTO messages (
         content, 
         sender_id, 
@@ -190,155 +162,114 @@ export async function POST(request: Request) {
       receiverType
     ];
     
-    console.log(`[${requestId}] 📝 Insert Query:`, insertQuery);
-    console.log(`[${requestId}] 📝 Insert Parameters:`, insertParams);
+    const result = await db.query(insertQuery, insertParams);
+    const message = result.rows[0];
     
-    try {
-      const result = await db.query(insertQuery, insertParams);
-      console.log(`[${requestId}] ✅ Database insert successful. Rows affected:`, result.rowCount);
-      
-      const message = result.rows[0];
-      if (!message) {
-        console.error(`[${requestId}] ❌ No message returned after insert`);
-        throw new Error('No message returned after insert');
-      }
-      
-      console.log(`[${requestId}] ✅ Message stored successfully:
-        - Message ID: ${message.id}
-        - Created at: ${new Date(message.created_at)}
-        - Content preview: ${content.substring(0, 50)}...
-        - Sender ID: ${message.sender_id}
-        - Receiver ID: ${message.receiver_id}
-        - Group ID: ${message.group_id}
-        - Sender Type: ${message.sender_type}
-        - Receiver Type: ${message.receiver_type}
-      `);
+    if (!message) {
+      console.error(`[${requestId}] ❌ No message returned after insert`);
+      throw new Error('No message returned after insert');
+    }
 
-      // Process message asynchronously
-      (async () => {
-        try {
-          console.log(`[${requestId}] 🔄 Starting async processing for message ${message.id}`);
-          
-          // Create and store embeddings
-          console.log(`[${requestId}] 📊 Creating embedding for message ${message.id}`);
-          const embedding = await createEmbedding(content);
-          console.log(`[${requestId}] ✅ Embedding created successfully`);
-          
-          await storeMessageEmbedding(
-            message.id,
-            embedding,
-            {
-              sender_id: session.user.id,
-              receiver_id: receiverId || groupId || '',
-              timestamp: new Date(),
-              group_id: groupId || undefined,
-              sender_type: 'user',
-              receiver_type: receiverType
-            }
+    // Process message asynchronously
+    (async () => {
+      try {
+        // Create and store embeddings
+        const embedding = await createEmbedding(content);
+        await storeMessageEmbedding(
+          message.id,
+          embedding,
+          {
+            sender_id: session.user.id,
+            receiver_id: receiverId || groupId || '',
+            timestamp: new Date(),
+            group_id: groupId || undefined,
+            sender_type: 'user',
+            receiver_type: receiverType
+          }
+        );
+
+        // Check if we need to generate an automated response
+        if (receiverId && receiverType === 'user') {
+          const statusResult = await db.query(
+            `SELECT * FROM user_status WHERE user_id = $1`,
+            [receiverId]
           );
-          console.log(`[${requestId}] ✅ Embedding stored for message ${message.id}`);
+          
+          if (statusResult.rows.length > 0) {
+            const status = statusResult.rows[0];
+            const receiverStatus = calculateEffectiveStatus(status);
+            const shouldGenerateResponse = receiverStatus.status === 'away' || receiverStatus.status === 'offline';
 
-          // Check if we need to generate an automated response
-          if (receiverId && receiverType === 'user') {
-            console.log(`[${requestId}] Checking recipient status for user: ${receiverId}`);
-            const statusResult = await db.query(
-              `SELECT * FROM user_status WHERE user_id = $1`,
-              [receiverId]
-            );
-            
-            if (statusResult.rows.length > 0) {
-              const status = statusResult.rows[0];
-              const receiverStatus = calculateEffectiveStatus(status);
-              const shouldGenerateResponse = receiverStatus.status === 'away' || receiverStatus.status === 'offline';
-              console.log(`[${requestId}] Recipient status: ${receiverStatus.status}, Should generate response: ${shouldGenerateResponse}`);
+            if (shouldGenerateResponse) {
+              console.log(`[${requestId}] Generating automated response for away/offline user`);
+              
+              const { rows: recentMessages } = await db.query(
+                `SELECT content 
+                 FROM messages 
+                 WHERE sender_id = $1 
+                   AND sender_type = 'user'
+                   AND created_at > NOW() - INTERVAL '7 days'
+                 ORDER BY created_at DESC 
+                 LIMIT 10`,
+                [receiverId]
+              );
 
-              if (shouldGenerateResponse) {
-                console.log(`[${requestId}] Starting automated response generation`);
-                try {
-                  // Gather recent messages for context
-                  console.log(`[${requestId}] Fetching recent messages for context`);
-                  const { rows: recentMessages } = await db.query(
-                    `SELECT content 
-                     FROM messages 
-                     WHERE sender_id = $1 
-                       AND sender_type = 'user'
-                       AND created_at > NOW() - INTERVAL '7 days'
-                     ORDER BY created_at DESC 
-                     LIMIT 10`,
-                    [receiverId]
-                  );
-                  console.log(`[${requestId}] Found ${recentMessages.length} recent messages for context`);
+              const messageHistory = recentMessages.map(m => m.content).join('\n');
+              const contextPrompt = `Based on the user's recent messages:\n${messageHistory}\n\nRespond to: ${content}`;
+              
+              const response = await processQuery(contextPrompt, receiverId, session.user.id);
+              
+              const automatedResponse = await db.query(
+                `INSERT INTO messages (
+                  content, 
+                  sender_id, 
+                  receiver_id, 
+                  sender_type,
+                  receiver_type,
+                  is_automated_response,
+                  original_message_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
+                RETURNING *`,
+                [
+                  response.answer,
+                  receiverId,
+                  session.user.id,
+                  'user',
+                  'user',
+                  true,
+                  message.id
+                ]
+              );
 
-                  const messageHistory = recentMessages.map(m => m.content).join('\n');
-                  const contextPrompt = `Based on the user's recent messages:\n${messageHistory}\n\nRespond to: ${content}`;
-                  
-                  console.log(`[${requestId}] Processing query through RAG system`);
-                  const response = await processQuery(contextPrompt, receiverId, session.user.id);
-                  console.log(`[${requestId}] RAG system generated response successfully`);
-                  
-                  console.log(`[${requestId}] Inserting automated response as offline user`);
-                  const automatedResponse = await db.query(
-                    `INSERT INTO messages (
-                      content, 
-                      sender_id, 
-                      receiver_id, 
-                      sender_type,
-                      receiver_type,
-                      is_automated_response,
-                      original_message_id
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
-                    RETURNING *`,
-                    [
-                      response.answer,
-                      receiverId,
-                      session.user.id,
-                      'user',
-                      'user',
-                      true,
-                      message.id
-                    ]
-                  );
-                  console.log(`[${requestId}] Automated response inserted successfully with ID: ${automatedResponse.rows[0]?.id}`);
-
-                  // Create embedding for automated response
-                  try {
-                    console.log(`[${requestId}] Creating embedding for automated response`);
-                    const responseEmbedding = await createEmbedding(response.answer);
-                    await storeMessageEmbedding(
-                      automatedResponse.rows[0].id,
-                      responseEmbedding,
-                      {
-                        sender_id: receiverId,
-                        receiver_id: session.user.id,
-                        timestamp: new Date(),
-                        is_automated_response: true,
-                        sender_type: 'user',
-                        receiver_type: 'user'
-                      }
-                    );
-                    console.log(`[${requestId}] Automated response embedding stored successfully`);
-                  } catch (embeddingError) {
-                    console.error(`[${requestId}] Error creating embedding for automated response:`, embeddingError);
+              // Create embedding for automated response
+              try {
+                const responseEmbedding = await createEmbedding(response.answer);
+                await storeMessageEmbedding(
+                  automatedResponse.rows[0].id,
+                  responseEmbedding,
+                  {
+                    sender_id: receiverId,
+                    receiver_id: session.user.id,
+                    timestamp: new Date(),
+                    is_automated_response: true,
+                    sender_type: 'user',
+                    receiver_type: 'user'
                   }
-                } catch (error) {
-                  console.error(`[${requestId}] Error generating automated response:`, error);
-                }
+                );
+              } catch (embeddingError) {
+                console.error(`[${requestId}] Error creating embedding for automated response:`, embeddingError);
               }
             }
           }
-        } catch (error) {
-          console.error(`[${requestId}] 🔥 Error in async processing:`, error);
         }
-      })();
+      } catch (error) {
+        console.error(`[${requestId}] Error in async processing:`, error);
+      }
+    })();
 
-      console.log(`[${requestId}] ✅ Request completed successfully - returning message`);
-      return NextResponse.json(message);
-    } catch (error) {
-      console.error(`[${requestId}] 🔥 Error in database insert:`, error);
-      return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-    }
+    return NextResponse.json(message);
   } catch (error) {
-    console.error(`[${requestId}] 🔥 Fatal error in POST /api/messages:`, error);
+    console.error(`[${requestId}] Error in POST /api/messages:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 } 

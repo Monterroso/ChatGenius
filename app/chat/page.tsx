@@ -24,6 +24,7 @@ import { UserListItem } from '@/components/UserListItem';
 import SearchBar from '@/components/SearchBar';
 import SearchResultsPopup from '@/components/SearchResultsPopup';
 import ChatMessages from '@/components/ChatMessages';
+import { GroupCreationDialog } from '@/components/GroupCreationDialog';
 
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B';
@@ -1003,6 +1004,19 @@ export default function Chat() {
         isOpen={showBotCreationDialog}
         onClose={() => setShowBotCreationDialog(false)}
         onBotCreated={handleBotCreated}
+      />
+
+      <GroupCreationDialog
+        isOpen={showNewGroupPopup}
+        onClose={() => setShowNewGroupPopup(false)}
+        onGroupCreated={(group) => {
+          setGroups(prevGroups => [...prevGroups, group]);
+          handleConversationSelect({
+            id: group.id,
+            type: 'group',
+            name: group.name
+          });
+        }}
       />
 
       {showSearchResults && (
