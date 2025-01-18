@@ -1,4 +1,5 @@
-import { createConversationalChain, formatChatHistory, initVectorStore, embeddings } from './langchain';
+import { createConversationalChain, formatChatHistory, initVectorStore } from './langchain';
+import { SystemMessage } from '@langchain/core/messages';
 import db from '@/lib/db';
 
 interface Message {
@@ -6,183 +7,186 @@ interface Message {
   content: string;
 }
 
+/**
+ * Processes a message and generates a response mimicking an offline user's style
+ * @param query The incoming message to respond to
+ * @param botId The ID of the AFK bot
+ * @param userId The ID of the user sending the message
+ * @param offlineUserId The ID of the offline user to mimic
+ */
 export async function processQuery(
   query: string,
   botId: string,
-  userId: string
+  userId: string,
+  offlineUserId: string
 ) {
   const debugId = Math.random().toString(36).substring(7);
-  console.log(`[RAG-${debugId}] Starting processQuery - Query: "${query}", BotId: ${botId}, UserId: ${userId}`);
+  console.log(`[RAG-${debugId}] Starting processQuery - Query: "${query}", UserId: ${userId}, OfflineUserId: ${offlineUserId}`);
   
   try {
-    console.log(`[RAG-${debugId}] Fetching recent direct conversation history`);
-    // Get recent direct conversation history between user and this bot
-    const result = await db.query(
-      `SELECT m.id, m.content, m.created_at, m.sender_id, m.receiver_id, m.group_id, m.deleted_at,
-        CASE 
-          WHEN m.sender_id = $1 THEN 'assistant'
-          ELSE 'user'
-        END as role
+    console.log(`[RAG-${debugId}] Fetching offline user's message history`);
+    const offlineUserHistory = await db.query(
+      `SELECT m.id, m.content, m.created_at, m.sender_id, 
+              m.receiver_id, m.group_id, m.deleted_at, m.conversation_context,
+              prev.content as previous_message,
+              CASE 
+                WHEN m.group_id IS NOT NULL THEN g.name
+                WHEN m.receiver_id IS NOT NULL THEN COALESCE(u.name, b.name)
+              END as context_name,
+              CASE 
+                WHEN m.group_id IS NOT NULL THEN 'group'
+                ELSE 'direct'
+              END as message_type
+       FROM messages m
+       LEFT JOIN messages prev ON m.reply_to_message_id = prev.id
+       LEFT JOIN groups g ON m.group_id = g.id
+       LEFT JOIN users u ON m.receiver_id = u.id AND m.receiver_type = 'user'
+       LEFT JOIN bot_users b ON m.receiver_id = b.id AND m.receiver_type = 'bot'
+       WHERE m.sender_id = $1
+         AND m.created_at > NOW() - INTERVAL '30 days'
+         AND m.content IS NOT NULL
+         AND m.deleted_at IS NULL
+         AND m.is_automated_response = FALSE
+         AND (m.message_type != 'auto_response' OR m.message_type IS NULL)
+         AND (m.is_bot_generated = FALSE OR m.is_bot_generated IS NULL)
+       ORDER BY m.created_at DESC
+       LIMIT 100`,
+      [offlineUserId]
+    );
+    console.log(`[RAG-${debugId}] Found ${offlineUserHistory.rows.length} messages from offline user`);
+
+    // Log message contexts for debugging
+    console.log(`[RAG-${debugId}] Message contexts:`, offlineUserHistory.rows.map(msg => ({
+      type: msg.message_type,
+      context: msg.context_name,
+      contentPreview: msg.content.substring(0, 50)
+    })));
+
+    console.log(`[RAG-${debugId}] Initializing vector store`);
+    const vectorStore = await initVectorStore();
+    
+    console.log(`[RAG-${debugId}] Searching for relevant response patterns`);
+    const relevantDocs = await vectorStore.similaritySearch(query, 5, { 
+      sender_id: offlineUserId
+    });
+    console.log(`[RAG-${debugId}] Found ${relevantDocs.length} relevant response patterns`);
+
+    const relevantMessages = relevantDocs.map(doc => ({
+      role: 'assistant',
+      content: doc.pageContent,
+      metadata: {
+        ...doc.metadata,
+        isOfflineUserMessage: true,
+        context: doc.metadata.group_id ? 
+          `in group ${doc.metadata.group_name}` : 
+          `to ${doc.metadata.receiver_name}`
+      }
+    }));
+
+    // Get direct conversation history between the two users for immediate context
+    console.log(`[RAG-${debugId}] Fetching recent direct conversation between users`);
+    const directHistory = await db.query(
+      `SELECT m.id, m.content, m.created_at, m.sender_id
        FROM messages m
        WHERE (m.sender_id = $1 AND m.receiver_id = $2)
           OR (m.sender_id = $2 AND m.receiver_id = $1)
        ORDER BY m.created_at DESC
-       LIMIT 10`,
-      [botId, userId]
+       LIMIT 5`,
+      [userId, offlineUserId]
     );
-    console.log(`[RAG-${debugId}] Found ${result.rows.length} direct conversation messages`);
 
-    console.log(`[RAG-${debugId}] Fetching user's message history across all conversations`);
-    // Get user's message history across all conversations
-    const userHistoryResult = await db.query(
-      `SELECT 
-        m.id, 
-        m.content, 
-        m.created_at, 
-        m.sender_id, 
-        m.receiver_id, 
-        m.receiver_type,
-        m.group_id, 
-        m.deleted_at,
-        CASE 
-          WHEN m.receiver_type = 'bot' THEN b.name
-          WHEN m.receiver_type = 'user' THEN u.name
-          WHEN m.group_id IS NOT NULL THEN g.name
-          ELSE NULL
-        END as receiver_name,
-        CASE
-          WHEN m.group_id IS NOT NULL THEN 'group'
-          ELSE m.receiver_type
-        END as context_type
-       FROM messages m
-       LEFT JOIN bot_users b ON m.receiver_id = b.id AND m.receiver_type = 'bot'
-       LEFT JOIN users u ON m.receiver_id = u.id AND m.receiver_type = 'user'
-       LEFT JOIN groups g ON m.group_id = g.id
-       WHERE m.sender_id = $1
-         AND (m.receiver_id != $2 OR m.group_id IS NOT NULL)
-         AND m.created_at > NOW() - INTERVAL '7 days'
-       ORDER BY m.created_at DESC
-       LIMIT 100`,
-      [userId, botId]
-    );
-    console.log(`[RAG-${debugId}] Found ${userHistoryResult.rows.length} historical messages`);
-
-    console.log(`[RAG-${debugId}] Initializing vector store`);
-    // Initialize vector store
-    const vectorStore = await initVectorStore();
-    console.log(`[RAG-${debugId}] Vector store initialized successfully`);
-    
-    console.log(`[RAG-${debugId}] Searching for relevant messages`);
-    // Log search parameters for debugging
-    console.log(`[RAG-${debugId}] Search parameters:`, {
-      query,
-      filters: { 
-        isUserMessage: true,
-        userId: userId
-      }
-    });
-    
-    // Search for relevant messages using vector store
-    const relevantDocs = await vectorStore.similaritySearch(query, 5, { 
-      sender_id: userId,
-      sender_type: 'user'
-    });
-    console.log(`[RAG-${debugId}] Found ${relevantDocs.length} relevant documents`);
-    console.log(`[RAG-${debugId}] Relevant docs:`, relevantDocs.map(doc => ({
-      content: doc.pageContent.substring(0, 50) + '...',
-      metadata: doc.metadata
-    })));
-
-    // Format relevant messages
-    const relevantMessages = relevantDocs.map(doc => ({
-      role: 'user',
-      content: doc.pageContent,
-      metadata: doc.metadata
-    }));
-
-    console.log(`[RAG-${debugId}] Formatting conversation messages`);
-    // Format current conversation messages
-    const messages = result.rows.reverse().map(msg => ({
-      role: msg.role,
+    const messages = directHistory.rows.reverse().map(msg => ({
+      role: msg.sender_id === offlineUserId ? 'assistant' : 'user',
       content: msg.content,
       metadata: {
         id: msg.id,
         created_at: msg.created_at,
-        sender_id: msg.sender_id,
-        receiver_id: msg.receiver_id,
-        group_id: msg.group_id,
-        deleted_at: msg.deleted_at
+        sender_id: msg.sender_id
       }
     }));
 
-    console.log(`[RAG-${debugId}] Creating conversation chain`);
-    // Initialize conversation chain
-    const chain = await createConversationalChain(vectorStore, botId);
-    console.log(`[RAG-${debugId}] Conversation chain created successfully`);
+    // Analyze user's communication style
+    const styleAnalysis = await analyzeUserStyle(offlineUserHistory.rows);
+    console.log(`[RAG-${debugId}] Analyzed user style:`, styleAnalysis);
 
-    // Format both direct conversation history and relevant messages as AIMessage/HumanMessage
-    console.log(`[RAG-${debugId}] Formatting chat histories`);
+    const chain = await createConversationalChain(vectorStore, botId);
     const directChatHistory = formatChatHistory(messages);
     const relevantChatHistory = formatChatHistory(relevantMessages);
     
-    // Combine histories, putting relevant messages first (as context) followed by direct conversation
-    const combinedHistory = [...relevantChatHistory, ...directChatHistory];
-    console.log(`[RAG-${debugId}] Combined history length: ${combinedHistory.length}`);
+    const systemMessage = new SystemMessage({
+      content: `You are temporarily responding on behalf of an offline user. 
+               Based on their communication style analysis:
+               - They typically write messages around ${Math.round(styleAnalysis.averageLength)} characters long
+               - They use emojis ${styleAnalysis.emojiFrequency > 0.5 ? 'frequently' : 'rarely'}
+               - They use capital letters for emphasis ${styleAnalysis.capsFrequency > 0.3 ? 'often' : 'occasionally'}
+               - They use exclamation marks ${styleAnalysis.exclamationFrequency > 0.5 ? 'frequently' : 'sparingly'}
+               - They ${styleAnalysis.questionResponseRate > 0.7 ? 'usually' : 'sometimes'} respond to questions
+               
+               Formulate a response that matches these patterns while maintaining a natural conversation flow.`
+    });
 
-    console.log(`[RAG-${debugId}] Invoking LLM chain`);
-    // Get response from the LLM
+    console.log(`[RAG-${debugId}] Invoking LLM chain for AFK response`);
     const response = await chain.invoke({
       question: query,
-      chat_history: combinedHistory
+      chat_history: [systemMessage, ...relevantChatHistory, ...directChatHistory]
     });
-    console.log(`[RAG-${debugId}] LLM response received successfully`);
-    console.log(`[RAG-${debugId}] Response text: "${response.text.substring(0, 100)}..."`);
 
     return {
       answer: response.text,
-      sourceDocuments: response.sourceDocuments
+      sourceDocuments: response.sourceDocuments,
+      isAfkResponse: true,
+      originalUser: offlineUserId
     };
+
   } catch (error) {
     console.error(`[RAG-${debugId}] Error in processQuery:`, error);
     throw error;
   }
 }
 
-// Helper function to calculate cosine similarity between two vectors
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
-  const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
-  const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
-  return dotProduct / (magnitudeA * magnitudeB);
-}
-
-export async function getConversationHistory(botId: string, userId: string) {
-  const debugId = Math.random().toString(36).substring(7);
-  console.log(`[RAG-${debugId}] Getting conversation history - BotId: ${botId}, UserId: ${userId}`);
+/**
+ * Analyzes a user's communication patterns and style based on their message history
+ * @param messages Array of user messages with their context
+ * @returns Object containing style characteristics
+ */
+async function analyzeUserStyle(messages: any[]) {
+  // Calculate average message length
+  const avgLength = messages.reduce((sum, msg) => sum + msg.content.length, 0) / messages.length;
   
-  try {
-    const result = await db.query(
-      `SELECT m.*, 
-        CASE 
-          WHEN m.sender_id = $1 THEN 'assistant'
-          ELSE 'user'
-        END as role
-       FROM messages m
-       WHERE (m.sender_id = $1 AND m.receiver_id = $2)
-          OR (m.sender_id = $2 AND m.receiver_id = $1)
-       ORDER BY m.created_at ASC`,
-      [botId, userId]
-    );
-    console.log(`[RAG-${debugId}] Found ${result.rows.length} conversation history messages`);
+  // Analyze emoji usage
+  const emojiPattern = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
+  const emojiCount = messages.reduce((sum, msg) => {
+    const matches = msg.content.match(emojiPattern) || [];
+    return sum + matches.length;
+  }, 0);
+  const emojiFrequency = emojiCount / messages.length;
 
-    const messages = result.rows.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
-    
-    return messages;
-  } catch (error) {
-    console.error(`[RAG-${debugId}] Error getting conversation history:`, error);
-    throw error;
-  }
+  // Analyze capitalization patterns
+  const capsMessages = messages.filter(msg => 
+    msg.content.split(' ').some((word: string) => word === word.toUpperCase() && word.length > 1)
+  ).length;
+  const capsFrequency = capsMessages / messages.length;
+
+  // Analyze punctuation patterns
+  const exclamationCount = messages.reduce((sum, msg) => 
+    sum + (msg.content.match(/!/g) || []).length, 0
+  );
+  const questionCount = messages.reduce((sum, msg) => 
+    sum + (msg.content.match(/\?/g) || []).length, 0
+  );
+
+  // Analyze response patterns to questions
+  const questionResponses = messages.filter(msg => 
+    msg.previous_message?.includes('?')
+  ).length;
+
+  return {
+    averageLength: avgLength,
+    emojiFrequency,
+    capsFrequency,
+    exclamationFrequency: exclamationCount / messages.length,
+    questionFrequency: questionCount / messages.length,
+    questionResponseRate: questionResponses / messages.length,
+    timestamp: new Date().toISOString()
+  };
 }

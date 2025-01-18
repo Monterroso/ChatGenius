@@ -646,3 +646,196 @@
     }
     ```
 
+## Bots
+- `GET /api/bots`
+  - Requires a valid session
+  - Fetches a list of all bots belonging to the current user
+  - Returns bot ID, name, and personality
+  - Response format:
+    ```typescript
+    Array<{
+      id: string;
+      name: string;
+      personality: string;
+    }>
+    ```
+
+- `POST /api/bots`
+  - Creates a new bot associated with the current user
+  - Required fields: name
+  - Optional fields: personality, api_key
+  - Request body:
+    ```typescript
+    {
+      name: string;
+      personality?: string;
+      api_key?: string;
+    }
+    ```
+  - Returns the newly created bot's details
+  - Requires authentication
+
+- `DELETE /api/bots`
+  - Deletes a bot by ID (passed via query parameter)
+  - Requires a valid session and the bot's ID
+  - Returns success confirmation
+  - Response format:
+    ```typescript
+    {
+      success: boolean;
+    }
+    ```
+
+## Bot Chat
+- `POST /api/bots/chat`
+  - Expects a valid session and bot identification
+  - Lets a user send a message to a bot
+  - Immediately stores the user's message in the database
+  - Asynchronously processes bot's response using:
+    - Command parser (if message starts with "/")
+    - RAG (Retrieval-Augmented Generation) system
+  - Request body:
+    ```typescript
+    {
+      botId: string;
+      message: string;
+    }
+    ```
+  - Response format:
+    ```typescript
+    {
+      messageId: string;
+      status: "processing" | "completed";
+    }
+    ```
+
+## Bot Conversations
+- `GET /api/bots/[id]/conversations/latest`
+  - Finds the latest active conversation for the specified bot and current user
+  - Returns the single conversation ID if found
+  - Response format:
+    ```typescript
+    {
+      conversationId: string | null;
+    }
+    ```
+  - Requires authentication
+
+## Bot Feedback
+- `POST /api/bots/feedback`
+  - Submits feedback on a bot conversation
+  - Request body:
+    ```typescript
+    {
+      botId: string;
+      conversationId: string;
+      rating?: number;
+      feedbackText?: string;
+      metadata?: Record<string, any>;
+    }
+    ```
+  - Returns newly created feedback record ID
+  - Requires authentication
+
+- `GET /api/bots/feedback`
+  - Returns either:
+    - Aggregated metrics about bot usage
+    - History of feedback entries
+  - Query parameters:
+    - type: "metrics" | "history"
+    - limit?: number
+    - offset?: number
+  - Response format for metrics:
+    ```typescript
+    {
+      totalConversations: number;
+      averageRating: number;
+      responseTimeMs: number;
+      totalTokens: number;
+    }
+    ```
+  - Response format for history:
+    ```typescript
+    Array<{
+      id: string;
+      rating: number;
+      feedbackText: string;
+      createdAt: string;
+      metadata: Record<string, any>;
+    }>
+    ```
+  - Requires authentication
+
+## Message Threads
+- `GET /api/messages/[id]/thread`
+  - Recursively fetches a message and all its replies
+  - Forms a threaded conversation
+  - Checks user's permission to view (group membership or direct message context)
+  - Returns messages in chronological order
+  - Response format:
+    ```typescript
+    Array<{
+      id: string;
+      content: string;
+      created_at: string;
+      sender_id: string;
+      sender_name: string;
+      sender_username: string;
+      parent_id?: string;
+    }>
+    ```
+  - Requires authentication
+
+- `POST /api/messages/[id]/reply`
+  - Creates a new message replying to an existing one
+  - Inherits context (group or user conversation) from original message
+  - Request body:
+    ```typescript
+    {
+      content: string;
+    }
+    ```
+  - Returns the newly created reply with sender details
+  - Requires authentication
+
+## Group Threads
+- `POST /api/groups/[id]/threads`
+  - Creates a "thread" (subgroup) inside the specified parent group
+  - Validates membership in parent group
+  - Adds creator as thread member
+  - Inserts system message in parent group announcing new thread
+  - Request body:
+    ```typescript
+    {
+      name: string;
+      description?: string;
+    }
+    ```
+  - Response format:
+    ```typescript
+    {
+      id: string;
+      name: string;
+      description?: string;
+      parent_group_id: string;
+      created_at: string;
+    }
+    ```
+  - Requires authentication
+
+- `GET /api/groups/[id]/threads`
+  - Lists all threads belonging to the specified parent group
+  - Includes message counts for each thread
+  - Response format:
+    ```typescript
+    Array<{
+      id: string;
+      name: string;
+      description?: string;
+      message_count: number;
+      last_activity: string;
+      created_at: string;
+    }>
+    ```
+  - Requires authentication and membership in parent group
+

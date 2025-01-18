@@ -21,18 +21,33 @@ const CONTEXT_WINDOW = 2; // Number of messages before and after to include as c
  * @returns Formatted context string including user details and surrounding messages
  */
 async function getMessageContext(message: DBMessage): Promise<string> {
-  // Get user details
-  const [sender, receiver] = await Promise.all([
-    db.query('SELECT username, name FROM users WHERE id = $1::uuid', [message.sender_id]),
-    message.receiver_id 
-      ? db.query('SELECT username, name FROM users WHERE id = $1::uuid', [message.receiver_id])
-      : null
-  ]);
+  // Get user details with error handling
+  let senderDetails = { name: 'Unknown', username: 'unknown' };
+  let receiverDetails = null;
+  let groupDetails = null;
 
-  // Get group details if it's a group message
-  const group = message.group_id 
-    ? await db.query('SELECT name FROM groups WHERE id = $1::uuid', [message.group_id])
-    : null;
+  try {
+    const senderResult = await db.query('SELECT username, name FROM users WHERE id = $1::uuid', [message.sender_id]);
+    if (senderResult.rows.length > 0) {
+      senderDetails = senderResult.rows[0];
+    }
+
+    if (message.receiver_id) {
+      const receiverResult = await db.query('SELECT username, name FROM users WHERE id = $1::uuid', [message.receiver_id]);
+      if (receiverResult.rows.length > 0) {
+        receiverDetails = receiverResult.rows[0];
+      }
+    }
+
+    if (message.group_id) {
+      const groupResult = await db.query('SELECT name FROM groups WHERE id = $1::uuid', [message.group_id]);
+      if (groupResult.rows.length > 0) {
+        groupDetails = groupResult.rows[0];
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching user/group details:', error);
+  }
 
   // Get surrounding messages
   const surroundingMessages = await db.query(
@@ -61,17 +76,13 @@ async function getMessageContext(message: DBMessage): Promise<string> {
     ]
   );
 
-  // Format the context string
+  // Format the context string with safe fallbacks
   const contextParts = [
     `Time: ${new Date(message.created_at).toISOString()}`,
-    `Sender: ${sender.rows[0].name || sender.rows[0].username}`,
-    receiver?.rows[0] ? `Receiver: ${receiver.rows[0].name || receiver.rows[0].username}` : null,
-    group?.rows[0] ? `Group: ${group.rows[0].name}` : null,
-    '\nContext:',
-    ...surroundingMessages.rows.map(msg => 
-      `[${new Date(msg.created_at).toISOString()}] ${msg.name || msg.username}: ${msg.content}`
-    ),
-    '\nCurrent message:',
+    `Sender: ${senderDetails.name || senderDetails.username}`,
+    receiverDetails ? `Receiver: ${receiverDetails.name || receiverDetails.username}` : null,
+    groupDetails ? `Group: ${groupDetails.name}` : null,
+    '\nMessage:',
     message.content
   ].filter(Boolean);
 
