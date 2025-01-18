@@ -136,8 +136,13 @@ export class PostgreSQLVectorStore extends VectorStore {
         message_id,
         metadata,
         1 - (embedding <=> $1::vector) as similarity
-       FROM message_embeddings
-       WHERE 1=1 ${filterConditions}
+       FROM message_embeddings me
+       JOIN messages m ON me.message_id = m.id
+       WHERE 1=1 
+         AND m.is_automated_response = FALSE 
+         AND (m.message_type != 'auto_response' OR m.message_type IS NULL)
+         AND (m.is_bot_generated = FALSE OR m.is_bot_generated IS NULL)
+         ${filterConditions}
        ORDER BY similarity DESC
        LIMIT 5`,
       params
