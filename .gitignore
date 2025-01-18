@@ -78,3 +78,6 @@ yarn.lock
 # Public uploads
 /public/uploads/*
 !/public/uploads/.gitkeep
+
+# Scripts
+/scripts/conversation_scripts/*
