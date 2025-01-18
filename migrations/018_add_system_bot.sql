@@ -11,6 +11,11 @@ END $$;
 -- Add column to identify system bots if it doesn't exist
 ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS is_system_bot BOOLEAN DEFAULT FALSE;
 
+-- Update any existing bots to ensure they are not marked as system bots
+UPDATE bot_users 
+SET is_system_bot = FALSE 
+WHERE name != 'Auto Response Bot';
+
 -- Add check constraint if it doesn't exist
 DO $$ 
 BEGIN
@@ -20,8 +25,8 @@ BEGIN
   ) THEN
     ALTER TABLE bot_users ADD CONSTRAINT prevent_system_bot_names 
     CHECK (
-      (is_system_bot = TRUE AND name::system_bot_name IS NOT NULL) OR 
-      (is_system_bot = FALSE AND name::system_bot_name IS NULL)
+      (is_system_bot = TRUE AND name = 'Auto Response Bot') OR 
+      (is_system_bot = FALSE)
     );
   END IF;
 END $$;
@@ -77,12 +82,5 @@ BEGIN
     )
   ) THEN
     COMMENT ON COLUMN bot_users.is_system_bot IS 'Indicates if this is a system bot. Users cannot create bots with system bot names.';
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_description 
-    WHERE objoid = (SELECT oid FROM pg_type WHERE typname = 'system_bot_name')
-  ) THEN
-    COMMENT ON TYPE system_bot_name IS 'Enum of reserved system bot names that users cannot use when creating their own bots.';
   END IF;
 END $$; 

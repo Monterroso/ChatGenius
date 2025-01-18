@@ -14,6 +14,7 @@ import { authOptions } from "../auth/[...nextauth]/route"
 import { calculateEffectiveStatus } from '@/lib/status';
 import { processQuery } from '@/lib/ragSystem';
 import { createEmbedding, storeMessageEmbedding } from '@/lib/embeddings';
+import { findSimilarMessages } from '@/lib/embeddings';
 
 /**
  * GET /api/messages
@@ -106,8 +107,8 @@ export async function GET(request: Request) {
  * 1. Stores the message in the database immediately
  * 2. Returns a success response to the client
  * 3. Asynchronously:
- *    - Generates and stores embeddings for the message
- *    - If recipient is away/offline, generates and stores an automated response
+ *    - Generates and stores embeddings for the message with enhanced context
+ *    - If recipient is away/offline, generates a contextually relevant automated response
  */
 export async function POST(request: Request) {
   const requestId = Math.random().toString(36).substring(7);
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { content, groupId, receiverId } = body;
+    const { content, groupId, receiverId, parentThreadId } = body;
 
     // Basic validations
     if (!content) {
@@ -137,31 +138,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cannot specify both groupId and receiverId' }, { status: 400 });
     }
 
-    // Determine receiver type
+    // Determine receiver type and thread depth
     let receiverType: 'user' | 'bot' = 'user';
+    let threadDepth = 0;
+
     if (receiverId) {
       const botCheck = await db.query('SELECT id FROM bot_users WHERE id = $1', [receiverId]);
       receiverType = botCheck.rows.length > 0 ? 'bot' : 'user';
     }
 
-    const insertQuery = `INSERT INTO messages (
+    if (parentThreadId) {
+      const parentCheck = await db.query(
+        'SELECT thread_depth FROM messages WHERE id = $1',
+        [parentThreadId]
+      );
+      if (parentCheck.rows.length > 0) {
+        threadDepth = parentCheck.rows[0].thread_depth + 1;
+      }
+    }
+
+    // Insert the message
+    const insertQuery = `
+      INSERT INTO messages (
         content, 
         sender_id, 
         receiver_id, 
         group_id, 
         sender_type,
-        receiver_type
-      ) VALUES ($1, $2, $3, $4, $5, $6) 
+        receiver_type,
+        parent_thread_id,
+        thread_depth
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
       RETURNING *`;
+    
     const insertParams = [
       content,
       session.user.id,
       receiverId || null,
       groupId || null,
       'user',
-      receiverType
+      receiverType,
+      parentThreadId || null,
+      threadDepth
     ];
-    
+
     const result = await db.query(insertQuery, insertParams);
     const message = result.rows[0];
     
@@ -173,8 +193,8 @@ export async function POST(request: Request) {
     // Process message asynchronously
     (async () => {
       try {
-        // Create and store embeddings
-        const embedding = await createEmbedding(content);
+        // Create and store embeddings with enhanced context
+        const embedding = await createEmbedding(content, message.id);
         await storeMessageEmbedding(
           message.id,
           embedding,
@@ -203,6 +223,22 @@ export async function POST(request: Request) {
             if (shouldGenerateResponse) {
               console.log(`[${requestId}] Generating automated response for away/offline user`);
               
+              // Get similar messages from the past using embeddings
+              const similarMessages = await findSimilarMessages(embedding, 5, {
+                sender_id: receiverId
+              });
+
+              // Fetch the actual messages
+              const similarMessageIds = similarMessages.map(m => m.message_id);
+              const { rows: relevantMessages } = await db.query(
+                `SELECT content, created_at 
+                 FROM messages 
+                 WHERE id = ANY($1)
+                 ORDER BY created_at DESC`,
+                [similarMessageIds]
+              );
+
+              // Get recent messages for additional context
               const { rows: recentMessages } = await db.query(
                 `SELECT content 
                  FROM messages 
@@ -214,11 +250,25 @@ export async function POST(request: Request) {
                 [receiverId]
               );
 
+              // Combine contexts for better response generation
               const messageHistory = recentMessages.map(m => m.content).join('\n');
-              const contextPrompt = `Based on the user's recent messages:\n${messageHistory}\n\nRespond to: ${content}`;
+              const similarMessagesContext = relevantMessages
+                .map(m => m.content)
+                .join('\n');
+
+              const contextPrompt = `
+Based on the user's communication style from these similar messages:
+${similarMessagesContext}
+
+And their recent message history:
+${messageHistory}
+
+Please respond to this message in their style:
+${content}`;
               
               const response = await processQuery(contextPrompt, receiverId, session.user.id);
               
+              // Store the automated response
               const automatedResponse = await db.query(
                 `INSERT INTO messages (
                   content, 
@@ -227,8 +277,10 @@ export async function POST(request: Request) {
                   sender_type,
                   receiver_type,
                   is_automated_response,
-                  original_message_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
+                  original_message_id,
+                  parent_thread_id,
+                  thread_depth
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
                 RETURNING *`,
                 [
                   response.answer,
@@ -237,13 +289,15 @@ export async function POST(request: Request) {
                   'user',
                   'user',
                   true,
-                  message.id
+                  message.id,
+                  message.id,  // Set as reply to original message
+                  threadDepth + 1
                 ]
               );
 
               // Create embedding for automated response
               try {
-                const responseEmbedding = await createEmbedding(response.answer);
+                const responseEmbedding = await createEmbedding(response.answer, automatedResponse.rows[0].id);
                 await storeMessageEmbedding(
                   automatedResponse.rows[0].id,
                   responseEmbedding,
