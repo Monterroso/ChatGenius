@@ -98,10 +98,15 @@ export class PostgreSQLVectorStore extends VectorStore {
     filter?: Record<string, any>
   ): Promise<[Document, number][]> {
     const vectorString = `[${query.join(',')}]`;
+    console.log(`[DEBUG] Vector format:`, {
+      vectorLength: query.length,
+      sampleValues: query.slice(0, 3),
+      formattedString: vectorString.substring(0, 50) + '...'
+    });
 
     let filterConditions = '';
-    const params: any[] = [vectorString, k];
-    let paramCount = 3;
+    const params: any[] = [vectorString];
+    let paramCount = 2;
 
     if (filter) {
       const conditions = [];
@@ -115,6 +120,17 @@ export class PostgreSQLVectorStore extends VectorStore {
       }
     }
 
+    // First count total embeddings for debugging
+    const countResult = await db.query(
+      `SELECT COUNT(*) FROM message_embeddings`,
+      []
+    );
+    console.log(`[DEBUG] Total embeddings in database: ${countResult.rows[0].count}`);
+
+    // Log the filter conditions for debugging
+    console.log(`[DEBUG] Filter conditions:`, filterConditions);
+    console.log(`[DEBUG] Filter params:`, params.slice(1));
+
     const result = await db.query(
       `SELECT 
         message_id,
@@ -123,7 +139,7 @@ export class PostgreSQLVectorStore extends VectorStore {
        FROM message_embeddings
        WHERE 1=1 ${filterConditions}
        ORDER BY similarity DESC
-       LIMIT $2`,
+       LIMIT 5`,
       params
     );
 

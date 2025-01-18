@@ -73,10 +73,19 @@ export async function processQuery(
     console.log(`[RAG-${debugId}] Vector store initialized successfully`);
     
     console.log(`[RAG-${debugId}] Searching for relevant messages`);
+    // Log search parameters for debugging
+    console.log(`[RAG-${debugId}] Search parameters:`, {
+      query,
+      filters: { 
+        isUserMessage: true,
+        userId: userId
+      }
+    });
+    
     // Search for relevant messages using vector store
     const relevantDocs = await vectorStore.similaritySearch(query, 5, { 
-      isUserMessage: true,
-      userId: userId
+      sender_id: userId,
+      sender_type: 'user'
     });
     console.log(`[RAG-${debugId}] Found ${relevantDocs.length} relevant documents`);
     console.log(`[RAG-${debugId}] Relevant docs:`, relevantDocs.map(doc => ({
