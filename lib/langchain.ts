@@ -29,19 +29,11 @@ export const initVectorStore = async () => {
 };
 
 // Create a conversational chain
-export const createConversationalChain = async (vectorStore: PostgreSQLVectorStore, botId: string) => {
+export const createConversationalChain = async (vectorStore: PostgreSQLVectorStore, offlineUserId: string) => {
   const retriever = vectorStore.asRetriever({
-    filter: { botId },
+    filter: { sender_id: offlineUserId },
     k: 5
   });
-
-  // Fetch bot's personality from database
-  const result = await db.query(
-    'SELECT personality FROM bot_users WHERE id = $1',
-    [botId]
-  );
-  
-  const botPersonality = result.rows[0]?.personality || 'You are a helpful AI assistant.';
 
   return ConversationalRetrievalQAChain.fromLLM(
     llm,
@@ -57,27 +49,14 @@ Chat History:
 Follow Up Question: {question}
 
 Standalone question:`,
-      qaTemplate: `${botPersonality}
-
-You are having a conversation and MUST mirror the exact communication style from the relevant context, including tone, attitude, and level of formality or rudeness. If the user is polite, be polite. If the user is rude or aggressive, respond with the same level of rudeness or aggression.
-
-Relevant Context (CRUCIAL - This shows the user's exact communication style. Mirror it precisely):
+      qaTemplate: `Relevant Context:
 {context}
 
-Previous Conversation (with timestamps):
+Previous Conversation:
 {chat_history}
 
-Each message above includes its timestamp in the metadata (created_at field). You can reference these timestamps when discussing when messages were sent.
-
-Instructions for responding:
-1. First, analyze the exact tone from the context - including rudeness, aggression, friendliness, or formality
-2. Match that tone EXACTLY - don't be more polite or helpful than the user
-3. Use the same level of directness or confrontation as shown in the context
-4. Keep the same level of technical detail as shown in the context
-5. Copy their style of phrasing, slang, and expressions precisely
-
 Question: {question}
-Response (matching their exact tone and attitude):`,
+Response:`,
     }
   );
 };

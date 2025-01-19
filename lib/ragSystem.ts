@@ -13,78 +13,51 @@ interface Message {
  * @param botId The ID of the AFK bot
  * @param userId The ID of the user sending the message
  * @param offlineUserId The ID of the offline user to mimic
+ * @param contextMessages Array of relevant messages with metadata for context
  */
 export async function processQuery(
   query: string,
   botId: string,
   userId: string,
-  offlineUserId: string
+  offlineUserId: string,
+  contextMessages: Array<{ content: string; metadata: any }> = []
 ) {
   const debugId = Math.random().toString(36).substring(7);
-  console.log(`[RAG-${debugId}] Starting processQuery - Query: "${query}", UserId: ${userId}, OfflineUserId: ${offlineUserId}`);
+  console.log(`[RAG-${debugId}] ====== Starting processQuery ======`);
+  console.log(`[RAG-${debugId}] Input Parameters:`);
+  console.log(`[RAG-${debugId}] - Query: "${query}"`);
+  console.log(`[RAG-${debugId}] - BotId: ${botId}`);
+  console.log(`[RAG-${debugId}] - UserId: ${userId}`);
+  console.log(`[RAG-${debugId}] - OfflineUserId: ${offlineUserId}`);
+  console.log(`[RAG-${debugId}] - Context Messages Count: ${contextMessages.length}`);
   
   try {
-    console.log(`[RAG-${debugId}] Fetching offline user's message history`);
-    const offlineUserHistory = await db.query(
-      `SELECT m.id, m.content, m.created_at, m.sender_id, 
-              m.receiver_id, m.group_id, m.deleted_at, m.conversation_context,
-              prev.content as previous_message,
-              CASE 
-                WHEN m.group_id IS NOT NULL THEN g.name
-                WHEN m.receiver_id IS NOT NULL THEN COALESCE(u.name, b.name)
-              END as context_name,
-              CASE 
-                WHEN m.group_id IS NOT NULL THEN 'group'
-                ELSE 'direct'
-              END as message_type
-       FROM messages m
-       LEFT JOIN messages prev ON m.reply_to_message_id = prev.id
-       LEFT JOIN groups g ON m.group_id = g.id
-       LEFT JOIN users u ON m.receiver_id = u.id AND m.receiver_type = 'user'
-       LEFT JOIN bot_users b ON m.receiver_id = b.id AND m.receiver_type = 'bot'
-       WHERE m.sender_id = $1
-         AND m.created_at > NOW() - INTERVAL '30 days'
-         AND m.content IS NOT NULL
-         AND m.deleted_at IS NULL
-         AND m.is_automated_response = FALSE
-         AND (m.message_type != 'auto_response' OR m.message_type IS NULL)
-         AND (m.is_bot_generated = FALSE OR m.is_bot_generated IS NULL)
-       ORDER BY m.created_at DESC
-       LIMIT 100`,
-      [offlineUserId]
-    );
-    console.log(`[RAG-${debugId}] Found ${offlineUserHistory.rows.length} messages from offline user`);
-
-    // Log message contexts for debugging
-    console.log(`[RAG-${debugId}] Message contexts:`, offlineUserHistory.rows.map(msg => ({
-      type: msg.message_type,
-      context: msg.context_name,
-      contentPreview: msg.content.substring(0, 50)
-    })));
-
-    console.log(`[RAG-${debugId}] Initializing vector store`);
-    const vectorStore = await initVectorStore();
-    
-    console.log(`[RAG-${debugId}] Searching for relevant response patterns`);
-    const relevantDocs = await vectorStore.similaritySearch(query, 5, { 
-      sender_id: offlineUserId
+    // Log context messages details
+    console.log(`[RAG-${debugId}] Context Messages Details:`);
+    contextMessages.forEach((msg, index) => {
+      console.log(`[RAG-${debugId}] Message ${index + 1}:`);
+      console.log(`[RAG-${debugId}] - Content: "${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}"`);
+      console.log(`[RAG-${debugId}] - Metadata:`, msg.metadata);
     });
-    console.log(`[RAG-${debugId}] Found ${relevantDocs.length} relevant response patterns`);
-
-    const relevantMessages = relevantDocs.map(doc => ({
+    
+    // Initialize vector store with context messages if provided
+    console.log(`[RAG-${debugId}] Initializing vector store...`);
+    const vectorStore = await initVectorStore();
+    console.log(`[RAG-${debugId}] Vector store initialized successfully`);
+    
+    // Convert and log relevant messages
+    const relevantMessages = contextMessages.map(msg => ({
       role: 'assistant',
-      content: doc.pageContent,
+      content: msg.content,
       metadata: {
-        ...doc.metadata,
-        isOfflineUserMessage: true,
-        context: doc.metadata.group_id ? 
-          `in group ${doc.metadata.group_name}` : 
-          `to ${doc.metadata.receiver_name}`
+        ...msg.metadata,
+        isOfflineUserMessage: msg.metadata.sender_id === offlineUserId
       }
     }));
+    console.log(`[RAG-${debugId}] Converted ${relevantMessages.length} relevant messages`);
 
-    // Get direct conversation history between the two users for immediate context
-    console.log(`[RAG-${debugId}] Fetching recent direct conversation between users`);
+    // Get and log direct conversation history
+    console.log(`[RAG-${debugId}] Fetching direct conversation history...`);
     const directHistory = await db.query(
       `SELECT m.id, m.content, m.created_at, m.sender_id
        FROM messages m
@@ -94,6 +67,7 @@ export async function processQuery(
        LIMIT 5`,
       [userId, offlineUserId]
     );
+    console.log(`[RAG-${debugId}] Retrieved ${directHistory.rows.length} direct messages`);
 
     const messages = directHistory.rows.reverse().map(msg => ({
       role: msg.sender_id === offlineUserId ? 'assistant' : 'user',
@@ -104,15 +78,26 @@ export async function processQuery(
         sender_id: msg.sender_id
       }
     }));
+    console.log(`[RAG-${debugId}] Processed direct messages:`, messages);
 
-    // Analyze user's communication style
-    const styleAnalysis = await analyzeUserStyle(offlineUserHistory.rows);
-    console.log(`[RAG-${debugId}] Analyzed user style:`, styleAnalysis);
+    // Analyze and log user's communication style
+    const offlineUserMessages = contextMessages.filter(msg => 
+      msg.metadata.sender_id === offlineUserId
+    ).map(msg => ({ content: msg.content }));
+    console.log(`[RAG-${debugId}] Analyzing style for ${offlineUserMessages.length} offline user messages`);
+    
+    const styleAnalysis = await analyzeUserStyle(offlineUserMessages);
+    console.log(`[RAG-${debugId}] Style Analysis Results:`, styleAnalysis);
 
     const chain = await createConversationalChain(vectorStore, botId);
+    console.log(`[RAG-${debugId}] Conversational chain created`);
+    
     const directChatHistory = formatChatHistory(messages);
     const relevantChatHistory = formatChatHistory(relevantMessages);
-    
+    console.log(`[RAG-${debugId}] Chat histories formatted:`);
+    console.log(`[RAG-${debugId}] - Direct chat history length: ${directChatHistory.length}`);
+    console.log(`[RAG-${debugId}] - Relevant chat history length: ${relevantChatHistory.length}`);
+
     const systemMessage = new SystemMessage({
       content: `You are temporarily responding on behalf of an offline user. 
                Based on their communication style analysis:
@@ -125,10 +110,16 @@ export async function processQuery(
                Formulate a response that matches these patterns while maintaining a natural conversation flow.`
     });
 
+    console.log(`[RAG-${debugId}] System message created with style analysis`);
     console.log(`[RAG-${debugId}] Invoking LLM chain for AFK response`);
     const response = await chain.invoke({
       question: query,
       chat_history: [systemMessage, ...relevantChatHistory, ...directChatHistory]
+    });
+    console.log(`[RAG-${debugId}] LLM Response received:`, {
+      answer: response.text,
+      hasSourceDocs: !!response.sourceDocuments,
+      sourceDocsCount: response.sourceDocuments?.length
     });
 
     return {
@@ -140,6 +131,7 @@ export async function processQuery(
 
   } catch (error) {
     console.error(`[RAG-${debugId}] Error in processQuery:`, error);
+    console.error(`[RAG-${debugId}] Error stack:`, error.stack);
     throw error;
   }
 }

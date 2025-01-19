@@ -231,7 +231,7 @@ export async function POST(request: Request) {
               // Fetch the actual messages
               const similarMessageIds = similarMessages.map(m => m.message_id);
               const { rows: relevantMessages } = await db.query(
-                `SELECT content, created_at 
+                `SELECT content, created_at, id, sender_id, receiver_id, group_id
                  FROM messages 
                  WHERE id = ANY($1)
                  ORDER BY created_at DESC`,
@@ -240,7 +240,7 @@ export async function POST(request: Request) {
 
               // Get recent messages for additional context
               const { rows: recentMessages } = await db.query(
-                `SELECT content 
+                `SELECT content, created_at, id, sender_id, receiver_id, group_id
                  FROM messages 
                  WHERE sender_id = $1 
                    AND sender_type = 'user'
@@ -250,24 +250,33 @@ export async function POST(request: Request) {
                 [receiverId]
               );
 
-              // Combine contexts for better response generation
-              const messageHistory = recentMessages.map(m => m.content).join('\n');
-              const similarMessagesContext = relevantMessages
-                .map(m => m.content)
-                .join('\n');
+              // Combine messages for context
+              const contextMessages = [...relevantMessages, ...recentMessages].map(msg => ({
+                content: msg.content,
+                metadata: {
+                  id: msg.id,
+                  sender_id: msg.sender_id,
+                  receiver_id: msg.receiver_id,
+                  group_id: msg.group_id,
+                  created_at: msg.created_at
+                }
+              }));
 
-              const contextPrompt = `
-Based on the user's communication style from these similar messages:
-${similarMessagesContext}
-
-And their recent message history:
-${messageHistory}
-
-Please respond to this message in their style:
-${content}`;
+              console.log(`[${requestId}] 🔍 Processing query with ${similarMessages.length} similar messages and ${recentMessages.length} recent messages`);
               
-              const response = await processQuery(contextPrompt, receiverId, session.user.id);
+              const response = await processQuery(
+                content,
+                receiverId,
+                session.user.id,
+                receiverId,
+                contextMessages // Pass context messages to processQuery
+              );
               
+              console.log(`[${requestId}] ✅ Generated response:`, {
+                responseLength: response.answer.length,
+                firstFewWords: response.answer.slice(0, 50) + '...'
+              });
+
               // Store the automated response
               const automatedResponse = await db.query(
                 `INSERT INTO messages (
