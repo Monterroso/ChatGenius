@@ -139,27 +139,35 @@ export async function processQuery(
 /**
  * Analyzes a user's communication patterns and style based on their message history
  * @param messages Array of user messages with their context
- * @returns Object containing style characteristics
+ * @returns Object containing style characteristics with all frequencies normalized to 0-1 scale,
+ * where emoji, caps, and exclamation frequencies are calculated per character
  */
 async function analyzeUserStyle(messages: any[]) {
-  // Calculate average message length
-  const avgLength = messages.reduce((sum, msg) => sum + msg.content.length, 0) / messages.length;
+  // Calculate total character count and average message length
+  const totalCharCount = messages.reduce((sum, msg) => sum + msg.content.length, 0);
+  const avgLength = totalCharCount / messages.length;
   
-  // Analyze emoji usage
+  // Analyze emoji usage (per character)
   const emojiPattern = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
   const emojiCount = messages.reduce((sum, msg) => {
     const matches = msg.content.match(emojiPattern) || [];
     return sum + matches.length;
   }, 0);
-  const emojiFrequency = emojiCount / messages.length;
+  const emojiFrequency = emojiCount / totalCharCount;
 
-  // Analyze capitalization patterns
-  const capsMessages = messages.filter(msg => 
-    msg.content.split(' ').some((word: string) => word === word.toUpperCase() && word.length > 1)
-  ).length;
-  const capsFrequency = capsMessages / messages.length;
+  // Analyze capitalization patterns (per character)
+  const capsCount = messages.reduce((sum, msg) => {
+    const words = msg.content.split(/\s+/);
+    return sum + words.filter((word: string) => 
+      word === word.toUpperCase() && 
+      word.length > 1 && 
+      !/^[0-9]+$/.test(word) && // Exclude numbers
+      !['OK', 'TV', 'PC', 'USA', 'UK', 'EU'].includes(word) // Exclude common acronyms
+    ).join('').length;  // Count characters in caps words
+  }, 0);
+  const capsFrequency = capsCount / totalCharCount;
 
-  // Analyze punctuation patterns
+  // Analyze punctuation patterns (per character)
   const exclamationCount = messages.reduce((sum, msg) => 
     sum + (msg.content.match(/!/g) || []).length, 0
   );
@@ -167,7 +175,10 @@ async function analyzeUserStyle(messages: any[]) {
     sum + (msg.content.match(/\?/g) || []).length, 0
   );
 
-  // Analyze response patterns to questions
+  // Calculate exclamation frequency per character and cap it at 1.0
+  const exclamationFrequency = Math.min(exclamationCount / totalCharCount, 1.0);
+
+  // Analyze response patterns to questions (keep this per message as it's about conversation flow)
   const questionResponses = messages.filter(msg => 
     msg.previous_message?.includes('?')
   ).length;
@@ -176,9 +187,9 @@ async function analyzeUserStyle(messages: any[]) {
     averageLength: avgLength,
     emojiFrequency,
     capsFrequency,
-    exclamationFrequency: exclamationCount / messages.length,
-    questionFrequency: questionCount / messages.length,
-    questionResponseRate: questionResponses / messages.length,
+    exclamationFrequency,
+    questionFrequency: questionCount / messages.length, // Keep per message as it's about sentence structure
+    questionResponseRate: questionResponses / messages.length, // Keep per message as it's about conversation flow
     timestamp: new Date().toISOString()
   };
 }
